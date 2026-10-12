@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Solzzick" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
-        <item name="android:windowSplashScreenBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/solzzick_cream</item>
+        <item name="android:statusBarColor">@color/solzzick_cream</item>
+        <item name="android:navigationBarColor">@color/solzzick_cream</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowSplashScreenBackground">@color/solzzick_cream</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
     </style>
 </resources>

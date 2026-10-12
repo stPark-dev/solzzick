@@ -7,6 +7,7 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,11 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,7 +27,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
@@ -83,44 +83,61 @@ private fun displayName(context: Context, source: String): String {
     }.getOrNull() ?: uri.lastPathSegment ?: source
 }
 
+private fun stageColor(stage: Stage): Color = when (stage) {
+    Stage.NEEDS_SELECTION -> Brand.Orange
+    Stage.READY -> Brand.HoldBlue
+    Stage.DONE -> Brand.Success
+    Stage.FAILED -> Brand.HoldRed
+    Stage.SCANNING, Stage.ANALYZING, Stage.RENDERING -> Brand.Viewfinder
+    else -> Brand.InkSoft
+}
+
 /** 일괄 편집 목록(상태 없음): 공통 설정 + 항목별 상태·동작 + 모두 만들기. */
 @Composable
 fun BatchList(q: BatchQueue<Analysis>, actions: BatchActions) {
     val context = LocalContext.current
     val ready = q.items.count { it.stage == Stage.READY }
-    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("일괄 편집 (${q.items.size}개)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            TextButton(onClick = actions::close) { Text("닫기") }
+            Text("일괄 편집", style = MaterialTheme.typography.titleLarge)
+            StatusPill("${q.items.size}개", Brand.Orange, Modifier.padding(start = 8.dp))
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = actions::close) { Text("닫기", color = Brand.InkSoft) }
         }
-        Text("공통 설정 — 개별로 편집한 영상은 그 설정을 따릅니다", style = MaterialTheme.typography.bodySmall)
-        SettingsControls(q.common, actions::commonChanged)
-        HorizontalDivider()
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        BrandCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("공통 설정 — 개별로 편집한 영상은 그 설정을 따릅니다", style = MaterialTheme.typography.bodySmall, color = Brand.InkSoft)
+                SettingsControls(q.common, actions::commonChanged)
+            }
+        }
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
             items(q.items, key = { it.id }) { item ->
                 val name = remember(item.source) { displayName(context, item.source) }
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                            Text(statusText(item), style = MaterialTheme.typography.bodySmall)
+                val color = stageColor(item.stage)
+                BrandCard(Modifier.fillMaxWidth(), accent = color) {
+                    Column(Modifier.padding(start = 18.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                StatusPill(statusText(item), color)
+                            }
+                            when (item.stage) {
+                                Stage.NEEDS_SELECTION -> TextButton(onClick = { actions.select(item.id) }) { Text("등반자 선택", color = Brand.Orange) }
+                                Stage.READY -> TextButton(onClick = { actions.edit(item.id) }) { Text("편집", color = Brand.HoldBlue) }
+                                Stage.FAILED -> TextButton(onClick = { actions.retry(item.id) }) { Text("다시 시도", color = Brand.HoldRed) }
+                                Stage.DONE -> TextButton(onClick = { actions.open(item.id) }) { Text("보기", color = Brand.Success) }
+                                else -> Unit
+                            }
+                            if (item.stage != Stage.DONE) TextButton(onClick = { actions.remove(item.id) }) { Text("빼기", color = Brand.InkSoft) }
                         }
-                        when (item.stage) {
-                            Stage.NEEDS_SELECTION -> TextButton(onClick = { actions.select(item.id) }) { Text("등반자 선택") }
-                            Stage.READY -> TextButton(onClick = { actions.edit(item.id) }) { Text("편집") }
-                            Stage.FAILED -> TextButton(onClick = { actions.retry(item.id) }) { Text("다시 시도") }
-                            Stage.DONE -> TextButton(onClick = { actions.open(item.id) }) { Text("보기") }
-                            else -> Unit
+                        if (item.stage == Stage.ANALYZING || item.stage == Stage.RENDERING) {
+                            SunsetProgress(item.progress, Modifier.padding(end = 10.dp), height = 8.dp)
                         }
-                        if (item.stage != Stage.DONE) TextButton(onClick = { actions.remove(item.id) }) { Text("빼기") }
-                    }
-                    if (item.stage == Stage.ANALYZING || item.stage == Stage.RENDERING) {
-                        LinearProgressIndicator(progress = { item.progress }, modifier = Modifier.fillMaxWidth())
                     }
                 }
             }
         }
-        Button(onClick = actions::renderAll, enabled = ready > 0, modifier = Modifier.fillMaxWidth()) { Text("모두 만들기 ($ready)") }
+        SunsetButton(onClick = actions::renderAll, enabled = ready > 0, modifier = Modifier.fillMaxWidth()) { Text("모두 만들기 ($ready)") }
     }
 }
 
@@ -162,11 +179,11 @@ private fun SelectInBatch(processor: BatchProcessor, id: Int, onDone: () -> Unit
     var chosen by remember { mutableStateOf<Int?>(null) }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("따라갈 등반자를 탭하세요")
+        Text("따라갈 등반자를 탭하세요", style = MaterialTheme.typography.titleLarge)
         PersonPicker(preview, chosen) { x, y -> chosen = pickBox(preview.boxes, x, y) }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = onDone) { Text("나중에") }
-            Button(onClick = { processor.select(id, preview.boxes[chosen!!].center); onDone() }, enabled = chosen != null) { Text("선택") }
+            PillOutlinedButton(onClick = onDone) { Text("나중에") }
+            SunsetButton(onClick = { processor.select(id, preview.boxes[chosen!!].center); onDone() }, enabled = chosen != null) { Text("선택") }
         }
     }
 }
@@ -197,7 +214,7 @@ private fun EditInBatch(processor: BatchProcessor, q: BatchQueue<Analysis>, item
                 },
                 onSettingsChange = { processor.setItemSettings(item.id, it) },
             ) {
-                Button(onClick = onDone) { Text("완료") }
+                SunsetButton(onClick = onDone) { Text("완료") }
             }
         }
     }

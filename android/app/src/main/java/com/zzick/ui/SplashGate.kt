@@ -1,11 +1,15 @@
 package com.zzick.ui
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,9 +22,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
 import com.zzick.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -41,7 +45,7 @@ fun SplashGate(durationMs: Long = 1500, content: @Composable () -> Unit) {
         delay(durationMs)
         done = true
     }
-    Box(Modifier.fillMaxSize().background(Color.White), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().brandBackground(), contentAlignment = Alignment.Center) {
         Image(
             painterResource(R.drawable.solzzick_logo),
             contentDescription = "솔찍 로고",
@@ -52,4 +56,19 @@ fun SplashGate(durationMs: Long = 1500, content: @Composable () -> Unit) {
             },
         )
     }
+}
+
+/** 홀드를 잡고 매달린 듯 살짝 들썩이는 로고(홈·진행 화면). */
+@Composable
+fun BouncyLogo(modifier: Modifier = Modifier) {
+    val t = rememberInfiniteTransition(label = "logo")
+    val lift by t.animateFloat(0f, 1f, infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "lift")
+    Image(
+        painterResource(R.drawable.solzzick_logo),
+        contentDescription = "솔찍 로고",
+        modifier = modifier.graphicsLayer {
+            translationY = -8.dp.toPx() * lift
+            rotationZ = -2f + 4f * lift
+        },
+    )
 }

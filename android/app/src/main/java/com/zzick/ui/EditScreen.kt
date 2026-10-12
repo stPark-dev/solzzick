@@ -13,11 +13,11 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -29,7 +29,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -97,7 +104,11 @@ private fun LivePreview(s: EditModel, modifier: Modifier) {
         player.play()
     }
     // 뷰 변환으로 확대된 영상이 상자 밖(다른 UI 위)으로 그려지지 않게 자른다
-    Box(modifier.clipToBounds()) {
+    Box(modifier.clip(MaterialTheme.shapes.large).drawWithContent {
+        drawContent()
+        val inset = 10.dp.toPx()
+        viewfinderCorners(Offset(inset, inset), Size(size.width - 2 * inset, size.height - 2 * inset), stroke = 3.dp.toPx())
+    }) {
         AndroidView({ textureView }, Modifier.fillMaxWidth().aspectRatio(s.settings.aspect.aspect.toFloat()).clipToBounds())
     }
 }
@@ -114,7 +125,10 @@ fun ColumnScope.EditPanel(
     val previewWidth = if (s.settings.aspect == AspectRatio.R16x9) 1f else 0.62f
     LivePreview(s, Modifier.fillMaxWidth(previewWidth).weight(1f, fill = false))
 
-    Text("구간 ${fmt(s.window.startUs)} – ${fmt(s.window.endUs)}  (${fmt(s.window.durationUs)})", style = MaterialTheme.typography.bodySmall)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("구간 ${fmt(s.window.startUs)} – ${fmt(s.window.endUs)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+        StatusPill(fmt(s.window.durationUs), Brand.Orange)
+    }
     RangeSlider(
         value = s.window.startUs.toFloat()..s.window.endUs.toFloat(),
         onValueChange = { r -> onTrimChange(r.start.toLong(), r.endInclusive.toLong()) },
@@ -133,14 +147,22 @@ fun SettingsControls(settings: EditSettings, onChange: (EditSettings) -> Unit) {
     LabeledSlider("흔들림", if (settings.shake < 0.05) "짐벌" else "%.1f".format(settings.shake), settings.shake.toFloat(),
         0f..EditSettings.SHAKE_MAX.toFloat()) { onChange(settings.copy(shake = it.toDouble())) }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("자동 줌", Modifier.weight(1f))
-        Text("크럭스엔 가까이, 큰 동작엔 넓게", style = MaterialTheme.typography.bodySmall)
+        Text("자동 줌", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+        Text("크럭스엔 가까이, 큰 동작엔 넓게", style = MaterialTheme.typography.bodySmall, color = Brand.InkSoft)
         Switch(checked = settings.motionZoom, onCheckedChange = { onChange(settings.copy(motionZoom = it)) }, modifier = Modifier.padding(start = 8.dp))
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("비율", Modifier.width(52.dp))
+        Text("비율", Modifier.width(52.dp), fontWeight = FontWeight.Bold)
         for (a in AspectRatio.entries) {
-            FilterChip(selected = settings.aspect == a, onClick = { onChange(settings.copy(aspect = a)) }, label = { Text(a.label) })
+            FilterChip(
+                selected = settings.aspect == a,
+                onClick = { onChange(settings.copy(aspect = a)) },
+                label = { Text(a.label, fontWeight = FontWeight.Bold) },
+                shape = RoundedCornerShape(50),
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Brand.HoldBlue, selectedLabelColor = Color.White, containerColor = Color.White.copy(alpha = 0.7f),
+                ),
+            )
         }
     }
 }
@@ -149,16 +171,19 @@ fun SettingsControls(settings: EditSettings, onChange: (EditSettings) -> Unit) {
 @Composable
 fun ColumnScope.EditScreen(s: EditorState.Edit, vm: EditorViewModel) {
     EditPanel(EditModel(s.uri, s.analysis, s.window, s.durationUs, s.settings, s.path), vm::onTrimChange, vm::onSettingsChange) {
-        OutlinedButton(onClick = vm::cancel) { Text("취소") }
-        Button(onClick = vm::onRender) { Text("만들기") }
+        PillOutlinedButton(onClick = vm::cancel) { Text("취소") }
+        SunsetButton(onClick = vm::onRender) { Text("만들기") }
     }
 }
 
 @Composable
 private fun LabeledSlider(label: String, value: String, v: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.width(52.dp))
-        Slider(value = v, onValueChange = onChange, valueRange = range, modifier = Modifier.weight(1f))
-        Text(value, Modifier.width(56.dp), style = MaterialTheme.typography.bodySmall)
+        Text(label, Modifier.width(52.dp), fontWeight = FontWeight.Bold)
+        Slider(
+            value = v, onValueChange = onChange, valueRange = range, modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(thumbColor = Brand.Orange, activeTrackColor = Brand.Orange, inactiveTrackColor = Brand.Peach),
+        )
+        Text(value, Modifier.width(56.dp), style = MaterialTheme.typography.bodySmall, color = Brand.Orange, fontWeight = FontWeight.Bold)
     }
 }

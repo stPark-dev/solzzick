@@ -6,11 +6,8 @@ import androidx.compose.foundation.layout.Box
 import com.zzick.ui.quote.QuoteView
 import com.zzick.ui.quote.QuoteFeed
 import com.zzick.ui.quote.Quote
-import com.zzick.R
 import androidx.lifecycle.lifecycleScope
-import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.produceState
-import androidx.compose.foundation.Image
 import com.zzick.pipeline.BatchProcessor
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -39,11 +36,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,6 +47,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -66,9 +72,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         QuoteFeed.prefetch(lifecycleScope) // 스플래시 동안 첫 명언을 미리 받아둔다
         setContent {
-            MaterialTheme {
-                // Android 15+는 화면 끝까지 그려지므로 상태바·내비게이션바 영역을 비운다
-                Surface(Modifier.fillMaxSize()) { Box(Modifier.safeDrawingPadding()) { SplashGate {
+            SolzzickTheme {
+                // Android 15+는 화면 끝까지 그려지므로 상태바·내비게이션바 영역을 비운다(배경은 끝까지)
+                Surface(Modifier.fillMaxSize().brandBackground(), color = Color.Transparent) { Box(Modifier.safeDrawingPadding()) { SplashGate {
                     val processor = remember { BatchProcessor.get(applicationContext) }
                     var batch by rememberSaveable { mutableStateOf(false) }
                     if (batch) {
@@ -127,28 +133,43 @@ private fun EditorScreen(vm: EditorViewModel, processor: BatchProcessor, openBat
             EditorState.Idle -> Column(
                 Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Image(painterResource(R.drawable.solzzick_logo), contentDescription = "솔찍 로고", modifier = Modifier.height(56.dp))
+                BouncyLogo(Modifier.height(96.dp))
                 Spacer(Modifier.weight(1f))
                 val quote by produceState<Quote?>(null) { value = QuoteFeed.next() }
-                quote?.let { QuoteView(it) }
+                quote?.let {
+                    BrandCard(Modifier.fillMaxWidth()) { QuoteView(it, Modifier.padding(horizontal = 20.dp, vertical = 28.dp)) }
+                }
                 Spacer(Modifier.weight(1f))
-                Text("고정 촬영한 등반 영상을 누가 들고 찍어준 것처럼", style = MaterialTheme.typography.bodyMedium)
-                Button(onClick = {
+                Text(
+                    "고정 촬영한 등반 영상을\n누가 들고 찍어준 것처럼!",
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                )
+                SunsetButton(onClick = {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
-                }) { Text("영상 선택") }
-                OutlinedButton(onClick = {
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("영상 선택", fontSize = 18.sp)
+                }
+                PillOutlinedButton(onClick = {
                     multiPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
-                }) { Text("여러 영상 일괄 편집") }
+                }, modifier = Modifier.fillMaxWidth(), color = Brand.HoldBlue) {
+                    Icon(Icons.Filled.Add, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("여러 영상 일괄 편집")
+                }
                 if (batchQueue.items.isNotEmpty()) {
-                    TextButton(onClick = openBatch) { Text("일괄 편집 이어서 보기 (${batchQueue.items.size}개)") }
+                    TextButton(onClick = openBatch) { Text("일괄 편집 이어서 보기 (${batchQueue.items.size}개)", color = Brand.HoldBlue) }
                 }
             }
             EditorState.Scanning -> {
-                CircularProgressIndicator()
-                Text("등반자를 찾는 중…")
-                OutlinedButton(onClick = vm::cancel) { Text("취소") }
+                BouncyLogo(Modifier.height(80.dp))
+                CircularProgressIndicator(color = Brand.Orange, trackColor = Brand.Peach, strokeWidth = 6.dp, strokeCap = StrokeCap.Round)
+                Text("등반자를 찾는 중…", style = MaterialTheme.typography.titleMedium)
+                PillOutlinedButton(onClick = vm::cancel) { Text("취소") }
             }
             is EditorState.Select -> SelectClimber(s, vm)
             is EditorState.Analyzing -> Progress("등반자 추적 중", s.progress, vm::cancel)
@@ -156,8 +177,9 @@ private fun EditorScreen(vm: EditorViewModel, processor: BatchProcessor, openBat
             is EditorState.Rendering -> Progress("영상 만드는 중", s.progress, vm::cancel)
             is EditorState.Done -> Done(s, vm)
             is EditorState.Failed -> {
-                Text(s.message)
-                Button(onClick = vm::reset) { Text("처음으로") }
+                Text("앗, 미끄러졌어요!", style = MaterialTheme.typography.titleLarge, color = Brand.HoldRed)
+                Text(s.message, textAlign = TextAlign.Center, color = Brand.InkSoft)
+                SunsetButton(onClick = vm::reset) { Text("처음으로") }
             }
         }
     }
@@ -166,20 +188,22 @@ private fun EditorScreen(vm: EditorViewModel, processor: BatchProcessor, openBat
 @UnstableApi
 @Composable
 private fun SelectClimber(s: EditorState.Select, vm: EditorViewModel) {
-    Text(if (s.preview.boxes.size > 1) "따라갈 등반자를 탭하세요" else "이 사람을 따라갈게요")
+    Text(if (s.preview.boxes.size > 1) "따라갈 등반자를 탭하세요" else "이 사람을 따라갈게요", style = MaterialTheme.typography.titleLarge)
     PersonPicker(s.preview, s.selected, vm::onTap)
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedButton(onClick = vm::reset) { Text("취소") }
-        Button(onClick = vm::onStart, enabled = s.selected != null) { Text("시작") }
+        PillOutlinedButton(onClick = vm::reset) { Text("취소") }
+        SunsetButton(onClick = vm::onStart, enabled = s.selected != null) { Text("시작!") }
     }
 }
 
 @Composable
 private fun Progress(label: String, progress: Float, onCancel: () -> Unit) {
-    Text(label)
-    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-    Text("${(progress * 100).toInt()}%  ·  화면을 켜둔 채 기다려 주세요", style = MaterialTheme.typography.bodySmall)
-    OutlinedButton(onClick = onCancel) { Text("취소") }
+    BouncyLogo(Modifier.height(80.dp))
+    Text(label, style = MaterialTheme.typography.titleLarge)
+    Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = Brand.Orange)
+    SunsetProgress(progress)
+    Text("화면을 켜둔 채 기다려 주세요", style = MaterialTheme.typography.bodySmall, color = Brand.InkSoft)
+    PillOutlinedButton(onClick = onCancel) { Text("취소") }
 }
 
 @UnstableApi
@@ -193,19 +217,24 @@ private fun ColumnScope.Done(s: EditorState.Done, vm: EditorViewModel) {
                 setOnPreparedListener { it.isLooping = true; start() }
             }
         },
-        modifier = Modifier.weight(1f).aspectRatio(9f / 16f),
+        modifier = Modifier.weight(1f).aspectRatio(9f / 16f).clip(MaterialTheme.shapes.large),
     )
-    Text("갤러리(Movies/솔찍)에 저장했어요", style = MaterialTheme.typography.bodySmall)
+    Text("완등! 🎉", style = MaterialTheme.typography.headlineSmall, color = Brand.Orange)
+    Text("갤러리(Movies/솔찍)에 저장했어요", style = MaterialTheme.typography.bodySmall, color = Brand.InkSoft)
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedButton(onClick = vm::reset) { Text("새 영상") }
-        Button(onClick = {
+        PillOutlinedButton(onClick = vm::reset) { Text("새 영상") }
+        SunsetButton(brush = Brand.Ocean, onClick = {
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = "video/mp4"
                 putExtra(Intent.EXTRA_STREAM, s.galleryUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             context.startActivity(Intent.createChooser(send, "공유"))
-        }) { Text("공유") }
+        }) {
+            Icon(Icons.Filled.Share, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("공유")
+        }
     }
     Spacer(Modifier.height(8.dp))
 }

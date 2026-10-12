@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose 테마(ui/Theme.kt)의 Brand.Cream과 같은 색 — 시작 순간 흰 화면이 번쩍이지 않게 -->
+    <color name="solzzick_cream">#FFF7EA</color>
+</resources>
