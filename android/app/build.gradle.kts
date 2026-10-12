@@ -14,8 +14,8 @@ android {
         applicationId = "com.zzick"
         minSdk = 29
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.2.0"
+        versionCode = 4
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     // 릴리스 서명: keystore.properties(로컬 전용, 저장소에 넣지 않음). 없으면 릴리스 서명 없이 빌드된다.
