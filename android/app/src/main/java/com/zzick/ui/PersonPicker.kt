@@ -1,0 +1,43 @@
+package com.zzick.ui
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import com.zzick.pipeline.PeoplePreview
+
+/** 첫 장면 위에 사람 박스를 그리고, 탭한 위치(이미지 기준 0..1)를 알려준다. 선택된 박스는 초록. */
+@Composable
+fun PersonPicker(preview: PeoplePreview, selected: Int?, onTap: (Double, Double) -> Unit) {
+    val bmp = preview.bitmap
+    Box(
+        Modifier.fillMaxWidth().aspectRatio(bmp.width.toFloat() / bmp.height)
+            .pointerInput(preview) {
+                detectTapGestures { p -> onTap(p.x / size.width.toDouble(), p.y / size.height.toDouble()) }
+            },
+    ) {
+        Image(bmp.asImageBitmap(), contentDescription = "첫 장면", modifier = Modifier.fillMaxSize())
+        Canvas(Modifier.fillMaxSize()) {
+            preview.boxes.forEachIndexed { i, b ->
+                val chosen = i == selected
+                drawRect(
+                    color = if (chosen) Color(0xFF00E676) else Color.White,
+                    topLeft = Offset((b.x0 * size.width).toFloat(), (b.y0 * size.height).toFloat()),
+                    size = Size(((b.x1 - b.x0) * size.width).toFloat(), ((b.y1 - b.y0) * size.height).toFloat()),
+                    style = Stroke(width = if (chosen) 6f else 3f),
+                )
+            }
+        }
+    }
+}

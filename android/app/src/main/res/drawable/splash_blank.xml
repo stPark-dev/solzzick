@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 시스템 스플래시(Android 12+)는 배경만 보이게 — 로고는 바로 이어지는 앱 스플래시에서 크게 보여준다. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@android:color/transparent" />
+</shape>

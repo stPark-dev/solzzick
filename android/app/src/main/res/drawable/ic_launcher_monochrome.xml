@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 테마 아이콘(단색)용 실루엣: 뷰파인더 안에서 위로 뻗는 등반자. 컬러 아이콘은 mipmap/ic_launcher_foreground(solzzick.png). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 뷰파인더 모서리 -->
+    <path
+        android:pathData="M32,41 L32,32 L41,32 M67,32 L76,32 L76,41 M32,67 L32,76 L41,76 M67,76 L76,76 L76,67"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 등반자: 몸통·팔·다리 -->
+    <path
+        android:pathData="M55,46 L52,58 M54.5,47.5 L48,41 L46,34.5 M55,48.5 L62,53 M52,58 L46,63 L48,70.5 M52,58 L59,63.5 L58,71"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 머리 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M52.6,40.2 a4.2,4.2 0 1,0 8.4,0 a4.2,4.2 0 1,0 -8.4,0 Z" />
+    <!-- 녹화 표시 -->
+    <path
+        android:fillColor="#FF3B30"
+        android:pathData="M68,40.5 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z" />
+</vector>
