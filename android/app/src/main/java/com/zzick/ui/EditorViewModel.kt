@@ -9,6 +9,7 @@ import com.zzick.core.vcam.EditSettings
 import com.zzick.core.tracking.pickBox
 import com.zzick.core.trim.TrimWindow
 import com.zzick.pipeline.Analysis
+import com.zzick.pipeline.AnalysisStore
 import com.zzick.pipeline.ClimbPipeline
 import com.zzick.pipeline.Gallery
 import com.zzick.pipeline.PeoplePreview
@@ -49,17 +50,40 @@ sealed interface EditorState {
 @UnstableApi
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val pipeline = ClimbPipeline(app)
+    private val store = AnalysisStore(app)
     // 디코더가 GL 컨텍스트를 호출 스레드에 만들므로 무거운 작업은 전용 단일 스레드에서
     private val worker = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val _state = MutableStateFlow<EditorState>(EditorState.Idle)
     val state: StateFlow<EditorState> = _state
     private var job: Job? = null
 
+    /** 전에 분석한 영상이면 저장본으로 바로 편집 화면, 아니면 등반자 찾기부터. */
     fun onVideoPicked(uri: Uri) = launchSafely {
         _state.value = EditorState.Scanning
+        withContext(Dispatchers.IO) { pipeline.requireReadable(uri) }
+        val saved = withContext(Dispatchers.IO) { store.load(uri) }
+        if (saved != null) toEdit(uri, saved.analysis) else scan(uri)
+    }
+
+    /** 편집 화면에서: 저장본을 무시하고 등반자 선택부터 다시(엉뚱한 사람을 따라갔을 때). */
+    fun onReanalyze() {
+        val e = _state.value as? EditorState.Edit ?: return
+        launchSafely {
+            _state.value = EditorState.Scanning
+            scan(e.uri)
+        }
+    }
+
+    private suspend fun scan(uri: Uri) {
         val preview = withContext(worker) { pipeline.findPeople(uri, isCancelled = cancelledCheck()) }
             ?: throw IllegalStateException("영상에서 사람을 찾지 못했어요")
         _state.value = EditorState.Select(uri, preview, selected = if (preview.boxes.size == 1) 0 else null)
+    }
+
+    private suspend fun toEdit(uri: Uri, analysis: Analysis) {
+        val settings = EditSettings()
+        val path = withContext(Dispatchers.Default) { pipeline.solvePath(analysis, settings.toParams()) }
+        _state.value = EditorState.Edit(uri, analysis, analysis.suggestTrim(), analysis.lastPtsUs, settings, path)
     }
 
     /** 선택 화면에서 탭한 위치(이미지 기준 0..1)에 가장 알맞은 사람 박스를 고른다. */
@@ -81,9 +105,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 // 취소 직후 작업 스레드가 보내는 마지막 진행률이 화면을 되돌리지 않도록
                 pipeline.analyze(s.uri, tap, isCancelled = cancelled) { if (!cancelled()) _state.value = EditorState.Analyzing(it) }
             }
-            val settings = EditSettings()
-            val path = withContext(Dispatchers.Default) { pipeline.solvePath(analysis, settings.toParams()) }
-            _state.value = EditorState.Edit(s.uri, analysis, analysis.suggestTrim(), analysis.lastPtsUs, settings, path)
+            withContext(Dispatchers.IO) { store.save(s.uri, analysis, tap) }
+            toEdit(s.uri, analysis)
         }
     }
 

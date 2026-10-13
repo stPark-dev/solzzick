@@ -61,6 +61,15 @@ class ClimbPipeline(private val context: Context) {
     fun decoder(uri: Uri, targetHeight: Int = 640) =
         FrameDecoder({ it.setDataSource(context, uri, null) }, targetHeight)
 
+    /**
+     * 영상을 열 수 있는지 미리 확인 — 디코더 오류("Failed to instantiate extractor") 대신 알아볼 수 있는 이유로 실패.
+     * 공유로 받은 영상은 앱을 다시 켜면 읽기 권한이 사라져 있을 수 있다.
+     */
+    fun requireReadable(uri: Uri) {
+        val ok = runCatching { context.contentResolver.openFileDescriptor(uri, "r")!!.close() }.isSuccess
+        check(ok) { "영상을 열 수 없어요. 다시 골라 주세요(공유로 받은 영상이면 다시 공유해 주세요)" }
+    }
+
     /** 화질 안내용 원본 정보. 비트레이트는 파일 크기 / 길이(오디오 포함), 모르면 0. */
     fun sourceInfo(uri: Uri): SourceInfo = sourceInfo(uri, decoder(uri))
 

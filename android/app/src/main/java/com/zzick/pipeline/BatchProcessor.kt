@@ -1,11 +1,13 @@
 package com.zzick.pipeline
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.media3.common.util.UnstableApi
 import com.zzick.core.batch.BatchQueue
 import com.zzick.core.batch.Stage
 import com.zzick.core.batch.Work
+import com.zzick.core.store.BatchQueueCodec
 import com.zzick.core.trim.TrimWindow
 import com.zzick.core.vcam.EditSettings
 import kotlinx.coroutines.CancellationException
@@ -16,6 +18,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -25,9 +30,14 @@ import java.util.concurrent.Executors
 /**
  * 일괄 편집 처리기. 큐(BatchQueue)의 다음 일을 하나씩 실행하고, 일이 있는 동안 포그라운드 서비스를 띄워
  * 앱이 백그라운드로 가도 계속 처리한다. 모든 공개 함수는 메인 스레드에서 호출.
+ * 목록은 stateFile에 저장해 앱이 강제 종료돼도 다시 켜면 이어서 처리하고, 분석 결과는 store에서 다시 붙인다.
  */
 @UnstableApi
-class BatchProcessor(context: Context) {
+class BatchProcessor(
+    context: Context,
+    private val stateFile: File = File(context.applicationContext.filesDir, "batch_queue.bin"),
+    private val store: AnalysisStore = AnalysisStore(context),
+) {
     private val app = context.applicationContext
     private val pipeline = ClimbPipeline(app)
     // 디코더가 GL 컨텍스트를 호출 스레드에 만들므로 무거운 작업은 전용 단일 스레드에서
@@ -39,7 +49,20 @@ class BatchProcessor(context: Context) {
     private var loop: Job? = null
     private var current: Pair<Int, Job>? = null
 
+    init {
+        scope.launch {
+            restore()
+            // 복원이 끝난 뒤부터, 단계·구간·설정이 바뀔 때마다 저장(진행률은 빼고 — 너무 잦다)
+            _state.map { q -> q.copy(items = q.items.map { it.copy(progress = 0f, analysis = null) }) }
+                .distinctUntilChanged()
+                .conflate()
+                .collect { q -> withContext(Dispatchers.IO) { persist(q) } }
+        }
+    }
+
     fun add(uris: List<Uri>) {
+        // 앱을 다시 켠 뒤에도 영상을 읽을 수 있게(사진 선택기 주소는 허용, 공유로 받은 주소는 보통 거절 — 무시)
+        uris.forEach { runCatching { app.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         _state.update { q -> q.add(uris.map(Uri::toString)) }
         kick()
     }
@@ -106,8 +129,14 @@ class BatchProcessor(context: Context) {
         val cancelled = { job?.isActive == false }
         val uri = Uri.parse(_state.value.item(id).source)
         try {
+            if (work !is Work.Render) withContext(Dispatchers.IO) { pipeline.requireReadable(uri) }
             when (work) {
                 is Work.Scan -> {
+                    val saved = withContext(Dispatchers.IO) { store.load(uri) }
+                    if (saved != null) {
+                        _state.update { it.onAnalyzed(id, saved.analysis, saved.analysis.suggestTrim()) }
+                        return
+                    }
                     val preview = withContext(worker) { pipeline.findPeople(uri, cancelled) }
                     val people = preview?.boxes?.size ?: 0
                     if (people > 1) previews[id] = preview!!
@@ -117,6 +146,7 @@ class BatchProcessor(context: Context) {
                     val analysis = withContext(worker) {
                         pipeline.analyze(uri, work.tap, cancelled) { p -> if (!cancelled()) _state.update { it.onProgress(id, p) } }
                     }
+                    withContext(Dispatchers.IO) { store.save(uri, analysis, work.tap) }
                     _state.update { it.onAnalyzed(id, analysis, analysis.suggestTrim()) }
                 }
                 is Work.Render -> render(uri, id)
@@ -142,6 +172,34 @@ class BatchProcessor(context: Context) {
             out.delete()
         }
         _state.update { it.onRendered(id, galleryUri.toString()) }
+    }
+
+    /**
+     * 저장본을 읽어 이어서 처리. 앱 시작 때 한 번, 디스크·영상 읽기는 백그라운드에서
+     * (클라우드 영상은 여는 데 오래 걸릴 수 있다). 그사이 추가된 영상은 복원한 목록 뒤에 붙인다.
+     */
+    private suspend fun restore() {
+        val saved = withContext(Dispatchers.IO) {
+            runCatching { stateFile.inputStream().use { BatchQueueCodec.read<Analysis>(it) } }.getOrNull()
+                ?.restored { store.load(Uri.parse(it.source))?.analysis }
+        } ?: return
+        _state.update { cur -> if (cur.items.isEmpty()) saved else saved.add(cur.items.map { it.source }) }
+        if (_state.value.nextWork() != null) kick()
+    }
+
+    private fun persist(q: BatchQueue<*>) {
+        runCatching {
+            if (q.items.isEmpty()) {
+                stateFile.delete()
+                return
+            }
+            val tmp = File(stateFile.path + ".tmp")
+            java.io.FileOutputStream(tmp).use {
+                BatchQueueCodec.write(q, it)
+                it.fd.sync() // 전원이 꺼져도 빈 목록 파일이 남지 않게
+            }
+            check(tmp.renameTo(stateFile))
+        }
     }
 
     companion object {

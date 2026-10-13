@@ -68,20 +68,33 @@ import androidx.media3.common.util.UnstableApi
 private const val MAX_BATCH = 20
 
 class MainActivity : ComponentActivity() {
+    /** 공유로 받은 영상(처리하면 비운다). 화면 회전 등으로 다시 만들어질 때는 다시 처리하지 않는다. */
+    private var shared by mutableStateOf<List<Uri>>(emptyList())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         QuoteFeed.prefetch(lifecycleScope) // 스플래시 동안 첫 명언을 미리 받아둔다
+        if (savedInstanceState == null) shared = SharedVideos.from(intent, contentResolver::getType).take(MAX_BATCH)
         setContent {
             SolzzickTheme {
                 // Android 15+는 화면 끝까지 그려지므로 상태바·내비게이션바 영역을 비운다(배경은 끝까지)
                 Surface(Modifier.fillMaxSize().brandBackground(), color = Color.Transparent) { Box(Modifier.safeDrawingPadding()) { SplashGate {
                     val processor = remember { BatchProcessor.get(applicationContext) }
                     var batch by rememberSaveable { mutableStateOf(false) }
+                    val editor: EditorViewModel = viewModel()
+                    LaunchedEffect(shared) {
+                        when (shared.size) {
+                            0 -> return@LaunchedEffect
+                            1 -> { batch = false; editor.onVideoPicked(shared[0]) }
+                            else -> { processor.add(shared); batch = true }
+                        }
+                        shared = emptyList()
+                    }
                     if (batch) {
                         BackHandler { batch = false }
                         BatchScreen(processor) { batch = false }
                     } else {
-                        EditorScreen(viewModel(), processor) { batch = true }
+                        EditorScreen(editor, processor) { batch = true }
                     }
                 } } }
             }

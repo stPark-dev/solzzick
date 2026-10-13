@@ -197,6 +197,7 @@ fun SettingsControls(settings: EditSettings, onChange: (EditSettings) -> Unit) {
 fun ColumnScope.EditScreen(s: EditorState.Edit, vm: EditorViewModel) {
     EditPanel(EditModel(s.uri, s.analysis, s.window, s.durationUs, s.settings, s.path), vm::onTrimChange, vm::onSettingsChange) {
         PillOutlinedButton(onClick = vm::cancel) { Text("취소") }
+        PillOutlinedButton(onClick = vm::onReanalyze, color = Brand.HoldBlue) { Text("다시 분석") }
         SunsetButton(onClick = vm::onRender) { Text("만들기") }
     }
 }

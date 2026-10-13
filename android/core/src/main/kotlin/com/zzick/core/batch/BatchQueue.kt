@@ -38,7 +38,7 @@ data class BatchItem<A>(
 data class BatchQueue<A>(
     val items: List<BatchItem<A>> = emptyList(),
     val common: EditSettings = EditSettings(),
-    private val nextId: Int = 1,
+    internal val nextId: Int = 1, // 저장·복원(BatchQueueCodec)용으로 모듈 안에 공개
 ) {
     fun item(id: Int) = items.first { it.id == id }
 
@@ -103,6 +103,29 @@ data class BatchQueue<A>(
     fun withWindow(id: Int, window: TrimWindow) = update(id) { it.copy(window = window) }
 
     fun settingsFor(id: Int): EditSettings = item(id).settings ?: common
+
+    /**
+     * 앱을 다시 켰을 때 저장본에서 복원한 큐를 이어서 처리할 수 있게 정리한다.
+     * 중간에 끊긴 일은 대기로 되돌리고, 분석 결과는 analysisFor(분석 저장본)로 다시 붙인다 — 없으면 다시 분석.
+     * 선택 화면용 첫 장면은 저장하지 않으므로 선택 대기는 사람 찾기부터 다시.
+     */
+    fun restored(analysisFor: (BatchItem<A>) -> A?): BatchQueue<A> = copy(
+        items = items.map {
+            when (it.stage) {
+                Stage.SCANNING, Stage.NEEDS_SELECTION -> it.copy(stage = Stage.QUEUED, tap = null, progress = 0f)
+                Stage.ANALYZING -> it.copy(stage = Stage.WAITING_ANALYSIS, progress = 0f)
+                Stage.READY, Stage.WAITING_RENDER, Stage.RENDERING -> {
+                    val a = analysisFor(it)
+                    when {
+                        a == null -> it.copy(stage = Stage.WAITING_ANALYSIS, progress = 0f)
+                        it.stage == Stage.READY -> it.copy(analysis = a)
+                        else -> it.copy(stage = Stage.WAITING_RENDER, analysis = a, progress = 0f)
+                    }
+                }
+                else -> it
+            }
+        },
+    )
 
     private fun update(id: Int, f: (BatchItem<A>) -> BatchItem<A>) = copy(items = items.map { if (it.id == id) f(it) else it })
 

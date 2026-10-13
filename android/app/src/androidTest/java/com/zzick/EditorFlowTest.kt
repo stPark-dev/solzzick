@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.zzick.core.vcam.AspectRatio
 import com.zzick.core.vcam.EditSettings
+import com.zzick.pipeline.AnalysisStore
 import com.zzick.ui.EditorState
 import com.zzick.ui.EditorViewModel
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -29,6 +31,35 @@ class EditorFlowTest {
     private fun cacheVideos() = app.cacheDir.listFiles { f -> f.name.endsWith(".mp4") }.orEmpty().toList()
 
     private fun newVm() = runBlocking(Dispatchers.Main) { EditorViewModel(app) }
+
+    @Before
+    fun clearSavedAnalyses() = AnalysisStore(app).clear() // 저장본이 있으면 선택·분석 단계를 건너뛰므로
+
+    /** 한 번 분석한 영상을 다시 열면 바로 편집 화면. '다시 분석'은 저장본을 무시하고 등반자 선택부터. */
+    @Test
+    fun reopeningSameVideoSkipsAnalysis() = runBlocking<Unit> {
+        val vm = newVm()
+        withContext(Dispatchers.Main) { vm.onVideoPicked(uri) }
+        withTimeout(60_000) { vm.state.first { it is EditorState.Select || it is EditorState.Failed } }
+        withContext(Dispatchers.Main) { vm.onStart() }
+        val first = withTimeout(180_000) { vm.state.first { it is EditorState.Edit || it is EditorState.Failed } } as EditorState.Edit
+        withContext(Dispatchers.Main) { vm.reset() }
+
+        val seen = mutableListOf<EditorState>()
+        val t0 = System.currentTimeMillis()
+        withContext(Dispatchers.Main) { vm.onVideoPicked(uri) }
+        val again = withTimeout(10_000) { vm.state.first { seen += it; it is EditorState.Edit || it is EditorState.Failed } }
+        assertTrue("실패: $again", again is EditorState.Edit)
+        again as EditorState.Edit
+        assertTrue("저장본이 있으면 선택·분석을 건너뛰어야 함: $seen", seen.none { it is EditorState.Select || it is EditorState.Analyzing })
+        assertTrue("느림: ${System.currentTimeMillis() - t0}ms", System.currentTimeMillis() - t0 < 5_000)
+        assertEquals(first.analysis.result.ptsUs.size, again.analysis.result.ptsUs.size)
+        assertEquals(first.window, again.window)
+
+        withContext(Dispatchers.Main) { vm.onReanalyze() }
+        val select = withTimeout(60_000) { vm.state.first { it is EditorState.Select || it is EditorState.Failed } }
+        assertTrue("다시 분석은 등반자 선택부터: $select", select is EditorState.Select)
+    }
 
     @Test
     fun fullFlowSavesToGalleryAndLeavesNoTempFile() = runBlocking<Unit> {
