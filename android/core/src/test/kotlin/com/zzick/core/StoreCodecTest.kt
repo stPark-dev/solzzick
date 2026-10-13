@@ -57,6 +57,14 @@ class StoreCodecTest {
         assertNull("다른 분석 버전", AnalysisCodec.read(ByteArrayInputStream(otherVersion)))
     }
 
+    /** 0.3.5에서 등반자 고르는 방식이 바뀌었다 — 그 전(버전 1)에 저장한 분석은 버리고 다시 분석해야 한다. */
+    @Test
+    fun analysesSavedBeforeTrackingFixAreDiscarded() {
+        val bytes = ByteArrayOutputStream().also { AnalysisCodec.write(record(null, null), it) }.toByteArray()
+        java.nio.ByteBuffer.wrap(bytes).putInt(4, 1) // 버전 1로 저장된 파일
+        assertNull(AnalysisCodec.read(ByteArrayInputStream(bytes)))
+    }
+
     /** 깨진 저장본의 프레임 수가 터무니없으면 메모리를 잡기 전에 거절(1시간 60fps = 21.6만 프레임). */
     @Test
     fun absurdFrameCountIsRejected() {

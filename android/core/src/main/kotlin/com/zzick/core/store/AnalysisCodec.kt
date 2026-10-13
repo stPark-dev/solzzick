@@ -22,8 +22,11 @@ class AnalysisRecord(
 object AnalysisCodec {
     private const val MAGIC = 0x534A5A41 // "SJZA"
 
-    /** 분석 알고리즘이 바뀌어 결과가 달라지면 올린다 — 예전 저장본은 읽지 않고 다시 분석된다. */
-    const val VERSION = 1
+    /**
+     * 분석 알고리즘이 바뀌어 결과가 달라지면 올린다 — 예전 저장본은 읽지 않고 다시 분석된다.
+     * 2: 등반자 고르기(색 확인·사람 박스 주변 다시 찾기, 0.3.5) 변경
+     */
+    const val VERSION = 2
 
     /** 1시간 60fps(21.6만 프레임)의 넉넉한 배수 */
     private const val MAX_FRAMES = 1_000_000
