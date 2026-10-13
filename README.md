@@ -148,6 +148,16 @@ python3 -m venv .venv && .venv/bin/pip install numpy opencv-python-headless scip
 
 모든 기능은 테스트를 먼저 쓰고(실패 확인) 구현했습니다.
 
+### 배포
+
+서명은 GitHub Actions가 합니다(키는 저장소 Secrets에만 있음). `android/app/build.gradle.kts`의 `versionCode`·`versionName`을 올려 커밋한 뒤:
+
+```bash
+git tag v0.3.2 && git push origin main --tags   # 테스트 → 서명 빌드 → Releases에 APK 첨부
+```
+
+태그와 `versionName`이 다르면 빌드가 멈춥니다. Actions 탭의 **release → Run workflow**로 돌리면 릴리스 없이 서명된 APK만 받아 볼 수 있습니다.
+
 ## 알려진 한계
 
 - 원본 영상에서 잘라 확대하므로, 1080p 원본은 확대할수록 부드러워집니다. 4K 원본을 권장합니다.
