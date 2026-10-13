@@ -17,6 +17,7 @@ android {
         versionCode = 5
         versionName = "0.3.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["appLabel"] = "솔찍"
     }
     // 릴리스 서명: keystore.properties(로컬 전용, 저장소에 넣지 않음). 없으면 릴리스 서명 없이 빌드된다.
     val keystoreProps = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { f ->
@@ -33,6 +34,11 @@ android {
         }
     }
     buildTypes {
+        // 디버그는 패키지를 분리해 정식판과 한 폰에 같이 깔린다(테스트하려고 정식판을 지울 필요 없음)
+        debug {
+            applicationIdSuffix = ".debug"
+            manifestPlaceholders["appLabel"] = "솔찍 dev"
+        }
         release {
             signingConfig = signingConfigs.findByName("release")
             // MediaPipe가 JNI·리플렉션을 써서 난독화(R8)는 보류 — 켜려면 keep 규칙 검증 필요
