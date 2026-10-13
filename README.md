@@ -55,6 +55,7 @@
 
 > 64비트 ARM(arm64) Android 10 이상. 결과물은 갤러리 `Movies/솔찍`에 저장됩니다.
 > 화질은 원본이 좋을수록 좋습니다 — 가능하면 **카메라 원본(UHD·60fps)** 으로 찍은 영상을 쓰세요.
+> 결과물은 원본과 같은 프레임레이트로 나옵니다(60fps 원본 → 60fps). 원본이 저해상도이거나 카톡 등으로 다시 압축된 영상이면 편집 화면에서 알려 줍니다.
 
 ## 어떻게 동작하나
 
@@ -128,10 +129,17 @@ docs/images/   README 이미지
 cd android
 ./gradlew :core:test                 # 순수 Kotlin 테스트(JVM)
 ./gradlew :app:assembleDebug         # 디버그 APK
-./gradlew :app:connectedAndroidTest  # 실기기 테스트(분석·렌더·일괄 편집·UI)
+# 실기기 테스트(분석·렌더·일괄 편집·UI). 디버그 빌드는 com.zzick.debug라 정식판과 같이 깔린다.
+# connectedAndroidTest는 끝나면 앱을 지워 테스트 영상도 사라지므로, 설치 후 직접 실행한다:
+./gradlew :app:installDebug :app:installDebugAndroidTest
+adb shell am instrument -w com.zzick.debug.test/androidx.test.runner.AndroidJUnitRunner
 # 실기기 테스트용 영상은 저장소에 없음 — 앱 내부 저장소(files/videos/)에 넣어 둔다:
-#   adb push <영상> /sdcard/Android/data/com.zzick/files/videos/
-#   adb shell run-as com.zzick cp /storage/emulated/0/Android/data/com.zzick/files/videos/<영상> files/videos/
+#   adb push <영상> /sdcard/Android/data/com.zzick.debug/files/videos/
+#   adb shell run-as com.zzick.debug cp /storage/emulated/0/Android/data/com.zzick.debug/files/videos/<영상> files/videos/
+# 60fps·UHD·저화질 영상은 20260927_113733.mp4에서 만든다:
+#   ffmpeg -t 12 -i 20260927_113733.mp4 -vf minterpolate=fps=60:mi_mode=blend -c:v libx265 -b:v 20M -tag:v hvc1 -c:a aac fps60.mp4
+#   ffmpeg -t 10 -i 20260927_113733.mp4 -vf "scale=2160:2160,pad=2160:3840:0:840,minterpolate=fps=60:mi_mode=blend" -c:v libx265 -b:v 45M -tag:v hvc1 -c:a aac uhd60.mp4
+#   ffmpeg -t 10 -i 20260927_113733.mp4 -vf scale=720:720 -c:v libx264 -b:v 1500k -maxrate 1500k -bufsize 3M -c:a aac kakao.mp4
 
 # Python 프로토타입
 cd prototype
@@ -143,8 +151,8 @@ python3 -m venv .venv && .venv/bin/pip install numpy opencv-python-headless scip
 | 테스트 | 개수 |
 |---|---|
 | Python(기준 구현) | 78 |
-| Kotlin JVM(`core`) | 75 |
-| 실기기(Galaxy S23 Ultra) | 24 |
+| Kotlin JVM(`core`) | 83 |
+| 실기기(Galaxy S23 Ultra) | 36 |
 
 모든 기능은 테스트를 먼저 쓰고(실패 확인) 구현했습니다.
 

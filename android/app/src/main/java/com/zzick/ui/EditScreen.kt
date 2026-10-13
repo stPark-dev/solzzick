@@ -6,6 +6,8 @@ import android.os.Looper
 import android.view.TextureView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -44,6 +46,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import com.zzick.core.quality.QualityIssue
+import com.zzick.core.quality.SourceQuality
 import com.zzick.core.render.FrameIndexMap
 import com.zzick.core.render.PreviewTransform
 import com.zzick.core.vcam.AspectRatio
@@ -136,7 +140,28 @@ fun ColumnScope.EditPanel(
         modifier = Modifier.fillMaxWidth(),
     )
     SettingsControls(s.settings, onSettingsChange)
+    val issues = remember(s.analysis.source, s.settings) { s.analysis.source?.let { SourceQuality.assess(it, s.settings.toParams()) }.orEmpty() }
+    QualityNotice(issues)
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), content = buttons)
+}
+
+/** 결과가 흐릴 만한 원본이면 이유와 해결책을 한 줄씩. 문제가 없으면 아무것도 그리지 않는다. */
+@Composable
+fun QualityNotice(issues: Set<QualityIssue>) {
+    if (issues.isEmpty()) return
+    Column(
+        Modifier.fillMaxWidth().background(Brand.Peach, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        for (issue in issues) {
+            val text = when (issue) {
+                QualityIssue.UPSCALE -> "확대하면 흐려질 수 있어요 — 원본 해상도에 비해 많이 늘리고 있어요. 확대를 줄이거나 4K로 찍은 원본을 쓰세요."
+                QualityIssue.LOW_RESOLUTION -> "원본 해상도가 낮아 흐려질 수 있어요. 카메라 원본이나 4K로 찍은 영상을 쓰세요."
+                QualityIssue.RECOMPRESSED -> "다시 압축된 영상 같아요(카톡 등). 갤러리의 카메라 원본을 쓰면 더 선명해요."
+            }
+            Text(text, style = MaterialTheme.typography.bodySmall, color = Brand.Ink)
+        }
+    }
 }
 
 /** 확대·흔들림·비율 조절(편집 화면과 일괄 편집 공통 설정에서 함께 씀). */

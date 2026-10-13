@@ -39,6 +39,8 @@ class FrameDecoder(private val setSource: (MediaExtractor) -> Unit, targetHeight
     val durationUs: Long
     /** 컨테이너에 적힌 프레임레이트(없으면 30). 실제 값은 디코드한 pts로 다시 계산할 것. */
     val frameRate: Double
+    /** 영상 코덱 MIME (예: video/hevc) */
+    val mime: String
     private val trackIndex: Int
     private val format: MediaFormat
 
@@ -62,6 +64,7 @@ class FrameDecoder(private val setSource: (MediaExtractor) -> Unit, targetHeight
         height = minOf(targetHeight, srcHeight)
         width = (srcWidth.toLong() * height / srcHeight).toInt() / 2 * 2
         durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
+        mime = format.getString(MediaFormat.KEY_MIME)!!
         frameRate = if (format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
             runCatching { format.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble() }
                 .getOrElse { format.getFloat(MediaFormat.KEY_FRAME_RATE).toDouble() }

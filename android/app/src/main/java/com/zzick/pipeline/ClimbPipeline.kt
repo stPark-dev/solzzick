@@ -19,6 +19,7 @@ import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
 import com.zzick.core.analysis.AnalysisResult
 import com.zzick.core.analysis.Analyzer
+import com.zzick.core.quality.SourceInfo
 import com.zzick.core.tracking.Box
 import com.zzick.core.trim.Trim
 import com.zzick.core.trim.TrimWindow
@@ -40,7 +41,13 @@ private fun Box.clamped() = Box(x0.coerceIn(0.0, 1.0), y0.coerceIn(0.0, 1.0), x1
 class PeoplePreview(val frameIndex: Int, val bitmap: Bitmap, val boxes: List<Box>)
 
 /** 분석 결과 + 렌더에 필요한 원본 정보. 파라미터만 바꿔 다시 렌더할 때 재사용한다. */
-class Analysis(val result: AnalysisResult, val srcW: Double, val srcH: Double, val fps: Double) {
+class Analysis(
+    val result: AnalysisResult,
+    val srcW: Double,
+    val srcH: Double,
+    val fps: Double,
+    val source: SourceInfo? = null, // 화질 안내용
+) {
     val firstPtsUs get() = result.ptsUs.first()
     val lastPtsUs get() = result.ptsUs.last()
 
@@ -53,6 +60,15 @@ class Analysis(val result: AnalysisResult, val srcW: Double, val srcH: Double, v
 class ClimbPipeline(private val context: Context) {
     fun decoder(uri: Uri, targetHeight: Int = 640) =
         FrameDecoder({ it.setDataSource(context, uri, null) }, targetHeight)
+
+    /** 화질 안내용 원본 정보. 비트레이트는 파일 크기 / 길이(오디오 포함), 모르면 0. */
+    fun sourceInfo(uri: Uri): SourceInfo = sourceInfo(uri, decoder(uri))
+
+    private fun sourceInfo(uri: Uri, dec: FrameDecoder): SourceInfo {
+        val size = runCatching { context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } }.getOrNull() ?: -1L
+        val bitrate = if (size > 0 && dec.durationUs > 0) size * 8_000_000 / dec.durationUs else 0L
+        return SourceInfo(dec.srcWidth, dec.srcHeight, dec.frameRate, bitrate, hevc = dec.mime == MimeTypes.VIDEO_H265)
+    }
 
     /**
      * 0.5초 간격으로 훑어 사람이 처음 보이는 프레임을 찾는다. 끝까지 없으면 null. 호출 스레드에서 실행.
@@ -107,7 +123,7 @@ class ClimbPipeline(private val context: Context) {
                 val fps = if (n > 1 && lastPts > firstPts) (n - 1) * 1e6 / (lastPts - firstPts) else dec.frameRate
                 val result = analyzer.finish(fps)
                 onProgress(1f)
-                return Analysis(result, dec.srcWidth.toDouble(), dec.srcHeight.toDouble(), fps)
+                return Analysis(result, dec.srcWidth.toDouble(), dec.srcHeight.toDouble(), fps, sourceInfo(uri, dec).copy(fps = fps))
             }
         }
     }
