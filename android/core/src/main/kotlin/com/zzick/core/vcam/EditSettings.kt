@@ -1,5 +1,7 @@
 package com.zzick.core.vcam
 
+import com.zzick.core.overlay.OverlayInfo
+
 /** 출력 비율과 그 비율의 기준 출력 높이(짧은 변 1080). */
 enum class AspectRatio(val aspect: Double, val outHeight: Int, val label: String) {
     R9x16(9.0 / 16.0, 1920, "9:16"),
@@ -13,6 +15,7 @@ data class EditSettings(
     val shake: Double = 1.0,
     val aspect: AspectRatio = AspectRatio.R9x16,
     val motionZoom: Boolean = true, // 크럭스엔 타이트, 큰 동작엔 넓게
+    val overlay: OverlayInfo = OverlayInfo(), // 영상 구석 표시(카메라와 무관)
 ) {
     fun toParams(base: CameraParams = CameraParams()) = base.copy(
         motionZoom = motionZoom,

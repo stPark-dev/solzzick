@@ -27,6 +27,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -37,11 +39,17 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Image
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -52,7 +60,12 @@ import com.zzick.core.render.FrameIndexMap
 import com.zzick.core.render.PreviewTransform
 import com.zzick.core.vcam.AspectRatio
 import com.zzick.core.vcam.EditSettings
+import com.zzick.core.vcam.VirtualCamera
+import com.zzick.pipeline.ClimbPipeline
+import com.zzick.pipeline.OverlayImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 internal fun fmt(us: Long) = "%d:%04.1f".format(us / 60_000_000, (us % 60_000_000) / 1e6)
 
@@ -76,6 +89,7 @@ private fun LivePreview(s: EditModel, modifier: Modifier) {
     val context = LocalContext.current
     val latest = rememberUpdatedState(s)
     val player = remember { ExoPlayer.Builder(context).build().apply { repeatMode = Player.REPEAT_MODE_ONE; volume = 0f } }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     val textureView = remember { TextureView(context) }
     DisposableEffect(Unit) {
         val main = Handler(Looper.getMainLooper())
@@ -95,7 +109,13 @@ private fun LivePreview(s: EditModel, modifier: Modifier) {
                 textureView.setTransform(matrix)
             }
         }
-        onDispose { player.release() }
+        // 앱이 뒤로 가면 멈춤(배터리)
+        val observer = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_STOP) player.pause() else if (e == Lifecycle.Event.ON_START) player.play() }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            player.release()
+        }
     }
     // 손잡이를 끄는 동안 매번 다시 열지 않도록 잠깐 기다렸다가 구간 반영
     LaunchedEffect(s.window) {
@@ -107,13 +127,29 @@ private fun LivePreview(s: EditModel, modifier: Modifier) {
         player.prepare()
         player.play()
     }
-    // 뷰 변환으로 확대된 영상이 상자 밖(다른 UI 위)으로 그려지지 않게 자른다
-    Box(modifier.clip(MaterialTheme.shapes.large).drawWithContent {
-        drawContent()
-        val inset = 10.dp.toPx()
-        viewfinderCorners(Offset(inset, inset), Size(size.width - 2 * inset, size.height - 2 * inset), stroke = 3.dp.toPx())
-    }) {
-        AndroidView({ textureView }, Modifier.fillMaxWidth().aspectRatio(s.settings.aspect.aspect.toFloat()).clipToBounds())
+    // 영상 구석 표시: 렌더와 같은 그림을 출력 크기로 그려 미리보기 크기에 맞춰 얹는다
+    val captureDate by produceState<java.time.LocalDate?>(null, s.uri) {
+        value = withContext(Dispatchers.IO) { ClimbPipeline(context).captureDate(s.uri) }
+    }
+    val overlay = s.settings.overlay
+    val words = overlay.words(captureDate)
+    val mark by produceState<android.graphics.Bitmap?>(null, overlay.grade, words, s.settings.aspect) {
+        delay(200) // 암장 이름을 치는 동안 매 글자 다시 그리지 않게
+        val (w, h) = VirtualCamera.outputSize(s.settings.toParams())
+        value = withContext(Dispatchers.Default) { OverlayImage.render(overlay.grade, words, w, h) }
+    }
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        // 뷰 변환으로 확대된 영상이 상자 밖(다른 UI 위)으로 그려지지 않게 자른다
+        Box(Modifier.weight(1f, fill = false).clip(MaterialTheme.shapes.large).drawWithContent {
+            drawContent()
+            val inset = 10.dp.toPx()
+            viewfinderCorners(Offset(inset, inset), Size(size.width - 2 * inset, size.height - 2 * inset), stroke = 3.dp.toPx())
+        }) {
+            // 폭·높이 중 모자란 쪽에 맞춰 비율 유지(세로 공간이 부족해도 찌그러지지 않게)
+            AndroidView({ textureView }, Modifier.aspectRatio(s.settings.aspect.aspect.toFloat()).clipToBounds())
+            mark?.let { Image(it.asImageBitmap(), contentDescription = overlay.text(captureDate), Modifier.matchParentSize(), contentScale = ContentScale.FillBounds) }
+        }
+        PlayerSeekBar(player, durationMs = s.window.durationUs / 1000)
     }
 }
 
@@ -190,6 +226,7 @@ fun SettingsControls(settings: EditSettings, onChange: (EditSettings) -> Unit) {
             )
         }
     }
+    OverlaySection(settings.overlay) { onChange(settings.copy(overlay = it)) }
 }
 
 @UnstableApi

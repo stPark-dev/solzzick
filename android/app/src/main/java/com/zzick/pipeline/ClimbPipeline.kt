@@ -1,6 +1,7 @@
 package com.zzick.pipeline
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Handler
@@ -8,6 +9,10 @@ import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.TextureOverlay
+import com.google.common.collect.ImmutableList
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
@@ -19,6 +24,8 @@ import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
 import com.zzick.core.analysis.AnalysisResult
 import com.zzick.core.analysis.Analyzer
+import com.zzick.core.overlay.CaptureDate
+import com.zzick.core.overlay.OverlayInfo
 import com.zzick.core.quality.SourceInfo
 import com.zzick.core.tracking.Box
 import com.zzick.core.trim.Trim
@@ -30,6 +37,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.concurrent.CancellationException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -69,6 +78,19 @@ class ClimbPipeline(private val context: Context) {
         val ok = runCatching { context.contentResolver.openFileDescriptor(uri, "r")!!.close() }.isSuccess
         check(ok) { "영상을 열 수 없어요. 다시 골라 주세요(공유로 받은 영상이면 다시 공유해 주세요)" }
     }
+
+    /** 원본을 찍은 날짜(이 기기 시간대). 영상에 기록이 없으면 null. */
+    fun captureDate(uri: Uri): LocalDate? = runCatching {
+        val raw = MediaMetadataRetriever().run {
+            try {
+                setDataSource(context, uri)
+                extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE)
+            } finally {
+                release()
+            }
+        }
+        CaptureDate.parse(raw, ZoneId.systemDefault())
+    }.getOrNull()
 
     /** 화질 안내용 원본 정보. 비트레이트는 파일 크기 / 길이(오디오 포함), 모르면 0. */
     fun sourceInfo(uri: Uri): SourceInfo = sourceInfo(uri, decoder(uri))
@@ -152,10 +174,14 @@ class ClimbPipeline(private val context: Context) {
         out: File,
         trim: TrimWindow? = null,
         videoBitrate: Int? = null,
+        overlay: OverlayInfo = OverlayInfo(), // 영상 구석 표시(암장·날짜·난이도)
         onProgress: (Float) -> Unit,
     ) {
         val path = withContext(Dispatchers.Default) { solvePath(analysis, params) }
         val (outW, outH) = VirtualCamera.outputSize(params)
+        val mark = withContext(Dispatchers.IO) {
+            OverlayImage.render(overlay.grade, overlay.words(if (overlay.showDate) captureDate(uri) else null), outW, outH)
+        }
         val window = trim ?: TrimWindow(analysis.firstPtsUs, analysis.lastPtsUs)
         val effect = CropEffect(path, analysis.result.ptsUs, window.startUs, analysis.srcW, analysis.srcH, outW, outH)
         val clip = MediaItem.ClippingConfiguration.Builder()
@@ -164,7 +190,7 @@ class ClimbPipeline(private val context: Context) {
             .build()
         val media = MediaItem.Builder().setUri(uri).setClippingConfiguration(clip).build()
         val item = EditedMediaItem.Builder(media)
-            .setEffects(Effects(emptyList(), listOf(effect)))
+            .setEffects(Effects(emptyList(), listOfNotNull(effect, mark?.let { OverlayEffect(ImmutableList.of<TextureOverlay>(BitmapOverlay.createStaticBitmapOverlay(it))) })))
             .build()
         withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { cont ->

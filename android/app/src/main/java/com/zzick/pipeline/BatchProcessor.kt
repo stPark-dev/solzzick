@@ -40,6 +40,7 @@ class BatchProcessor(
 ) {
     private val app = context.applicationContext
     private val pipeline = ClimbPipeline(app)
+    private val overlayPrefs = OverlayPrefs(app)
     // 디코더가 GL 컨텍스트를 호출 스레드에 만들므로 무거운 작업은 전용 단일 스레드에서
     private val worker = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -63,7 +64,11 @@ class BatchProcessor(
     fun add(uris: List<Uri>) {
         // 앱을 다시 켠 뒤에도 영상을 읽을 수 있게(사진 선택기 주소는 허용, 공유로 받은 주소는 보통 거절 — 무시)
         uris.forEach { runCatching { app.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
-        _state.update { q -> q.add(uris.map(Uri::toString)) }
+        _state.update { q ->
+            // 새 목록이면 암장 이름·날짜 표시는 지난번 그대로
+            val base = if (q.items.isEmpty()) q.withCommon(q.common.copy(overlay = overlayPrefs.load())) else q
+            base.add(uris.map(Uri::toString))
+        }
         kick()
     }
 
@@ -96,8 +101,15 @@ class BatchProcessor(
         _state.update { it.remove(id) }
     }
 
-    fun setCommon(settings: EditSettings) = _state.update { it.withCommon(settings) }
-    fun setItemSettings(id: Int, settings: EditSettings) = _state.update { it.withItemSettings(id, settings) }
+    fun setCommon(settings: EditSettings) {
+        if (settings.overlay != _state.value.common.overlay) overlayPrefs.save(settings.overlay)
+        _state.update { it.withCommon(settings) }
+    }
+
+    fun setItemSettings(id: Int, settings: EditSettings) {
+        if (settings.overlay != _state.value.settingsFor(id).overlay) overlayPrefs.save(settings.overlay)
+        _state.update { it.withItemSettings(id, settings) }
+    }
     fun setWindow(id: Int, window: TrimWindow) = _state.update { it.withWindow(id, window) }
 
     private fun kick() {
@@ -164,7 +176,7 @@ class BatchProcessor(
         val name = "zzick_${System.currentTimeMillis()}.mp4"
         val out = File(app.cacheDir, name)
         val galleryUri = try {
-            pipeline.render(uri, item.analysis!!, q.settingsFor(id).toParams(), out, item.window) { p ->
+            pipeline.render(uri, item.analysis!!, q.settingsFor(id).toParams(), out, item.window, overlay = q.settingsFor(id).overlay) { p ->
                 _state.update { it.onProgress(id, p) }
             }
             withContext(worker) { Gallery.saveVideo(app, out, name) }

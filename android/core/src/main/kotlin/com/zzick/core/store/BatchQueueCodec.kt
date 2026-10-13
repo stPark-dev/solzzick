@@ -3,6 +3,8 @@ package com.zzick.core.store
 import com.zzick.core.batch.BatchItem
 import com.zzick.core.batch.BatchQueue
 import com.zzick.core.batch.Stage
+import com.zzick.core.overlay.Grade
+import com.zzick.core.overlay.OverlayInfo
 import com.zzick.core.trim.TrimWindow
 import com.zzick.core.vcam.AspectRatio
 import com.zzick.core.vcam.EditSettings
@@ -15,7 +17,8 @@ import java.io.OutputStream
 /** 일괄 편집 목록을 기기에 저장하는 이진 형식. 분석 결과는 넣지 않는다(분석 저장본에서 다시 붙인다 — BatchQueue.restored). */
 object BatchQueueCodec {
     private const val MAGIC = 0x534A5A42 // "SJZB"
-    private const val VERSION = 1
+    /** 2: 설정에 영상 구석 표시(OverlayInfo) 추가. 1도 읽는다(표시 없음). */
+    private const val VERSION = 2
 
     fun write(q: BatchQueue<*>, out: OutputStream) {
         val d = DataOutputStream(out.buffered())
@@ -41,9 +44,10 @@ object BatchQueueCodec {
     /** 다른 버전이거나 깨진 저장본이면 null. */
     fun <A> read(input: InputStream): BatchQueue<A>? = try {
         val d = DataInputStream(input.buffered())
-        if (d.readInt() != MAGIC || d.readInt() != VERSION) null else {
+        val version = if (d.readInt() == MAGIC) d.readInt() else -1
+        if (version !in 1..VERSION) null else {
             val nextId = d.readInt()
-            val common = d.readSettings()
+            val common = d.readSettings(version)
             val items = List(d.readInt()) {
                 BatchItem<A>(
                     id = d.readInt(),
@@ -52,7 +56,7 @@ object BatchQueueCodec {
                     progress = d.readFloat(),
                     tap = d.readOptional { readDouble() to readDouble() },
                     window = d.readOptional { TrimWindow(readLong(), readLong()) },
-                    settings = d.readOptional { readSettings() },
+                    settings = d.readOptional { readSettings(version) },
                     output = d.readOptional { readUTF() },
                     error = d.readOptional { readUTF() },
                 )
@@ -67,7 +71,12 @@ object BatchQueueCodec {
 
     private fun DataOutputStream.writeSettings(s: EditSettings) {
         writeDouble(s.zoom); writeDouble(s.shake); writeUTF(s.aspect.name); writeBoolean(s.motionZoom)
+        writeUTF(s.overlay.gym); writeBoolean(s.overlay.showDate); writeOptional(s.overlay.grade) { writeUTF(it.name) }
     }
 
-    private fun DataInputStream.readSettings() = EditSettings(readDouble(), readDouble(), AspectRatio.valueOf(readUTF()), readBoolean())
+    private fun DataInputStream.readSettings(version: Int): EditSettings {
+        val base = EditSettings(readDouble(), readDouble(), AspectRatio.valueOf(readUTF()), readBoolean())
+        if (version < 2) return base
+        return base.copy(overlay = OverlayInfo(readUTF(), readBoolean(), readOptional { Grade.valueOf(readUTF()) }))
+    }
 }

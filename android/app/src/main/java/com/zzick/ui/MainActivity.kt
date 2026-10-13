@@ -20,7 +20,14 @@ import android.net.Uri
 import android.Manifest
 import android.os.Bundle
 import android.view.WindowManager
-import android.widget.VideoView
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -31,7 +38,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -223,15 +229,30 @@ private fun Progress(label: String, progress: Float, onCancel: () -> Unit) {
 @Composable
 private fun ColumnScope.Done(s: EditorState.Done, vm: EditorViewModel) {
     val context = LocalContext.current
+    val player = remember(s.galleryUri) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(s.galleryUri))
+            repeatMode = Player.REPEAT_MODE_ONE
+            prepare()
+            play()
+        }
+    }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(player) {
+        // 홈으로 나가거나 공유 창이 뜨면 소리와 함께 멈춤
+        val observer = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_STOP) player.pause() }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            player.release()
+        }
+    }
     AndroidView(
-        factory = { ctx ->
-            VideoView(ctx).apply {
-                setVideoURI(s.galleryUri)
-                setOnPreparedListener { it.isLooping = true; start() }
-            }
-        },
-        modifier = Modifier.weight(1f).aspectRatio(9f / 16f).clip(MaterialTheme.shapes.large),
+        factory = { ctx -> PlayerView(ctx).apply { useController = false } },
+        update = { it.player = player },
+        modifier = Modifier.weight(1f).fillMaxWidth().clip(MaterialTheme.shapes.large),
     )
+    PlayerSeekBar(player)
     Text("완등! 🎉", style = MaterialTheme.typography.headlineSmall, color = Brand.Orange)
     Text("갤러리(Movies/솔찍)에 저장했어요", style = MaterialTheme.typography.bodySmall, color = Brand.InkSoft)
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

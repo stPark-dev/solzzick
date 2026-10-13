@@ -12,6 +12,7 @@ import com.zzick.pipeline.Analysis
 import com.zzick.pipeline.AnalysisStore
 import com.zzick.pipeline.ClimbPipeline
 import com.zzick.pipeline.Gallery
+import com.zzick.pipeline.OverlayPrefs
 import com.zzick.pipeline.PeoplePreview
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +52,7 @@ sealed interface EditorState {
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val pipeline = ClimbPipeline(app)
     private val store = AnalysisStore(app)
+    private val overlayPrefs = OverlayPrefs(app)
     // 디코더가 GL 컨텍스트를 호출 스레드에 만들므로 무거운 작업은 전용 단일 스레드에서
     private val worker = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val _state = MutableStateFlow<EditorState>(EditorState.Idle)
@@ -81,7 +83,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun toEdit(uri: Uri, analysis: Analysis) {
-        val settings = EditSettings()
+        val settings = EditSettings(overlay = overlayPrefs.load()) // 암장 이름·날짜 표시는 지난번 그대로
         val path = withContext(Dispatchers.Default) { pipeline.solvePath(analysis, settings.toParams()) }
         _state.value = EditorState.Edit(uri, analysis, analysis.suggestTrim(), analysis.lastPtsUs, settings, path)
     }
@@ -116,6 +118,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     fun onSettingsChange(settings: EditSettings) {
         val e = _state.value as? EditorState.Edit ?: return
         _state.value = e.copy(settings = settings) // 슬라이더 위치는 즉시 반영
+        if (settings.overlay != e.settings.overlay) overlayPrefs.save(settings.overlay)
+        if (settings.copy(overlay = e.settings.overlay) == e.settings) return // 표시만 바뀜 — 카메라 경로는 그대로
         pathJob?.cancel()
         pathJob = viewModelScope.launch {
             val path = withContext(Dispatchers.Default) { pipeline.solvePath(e.analysis, settings.toParams()) }
@@ -141,7 +145,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             val name = "zzick_${System.currentTimeMillis()}.mp4"
             val out = File(ctx.cacheDir, name)
             val galleryUri = try {
-                pipeline.render(t.uri, t.analysis, t.settings.toParams(), out, t.window) { _state.value = EditorState.Rendering(it) }
+                pipeline.render(t.uri, t.analysis, t.settings.toParams(), out, t.window, overlay = t.settings.overlay) {
+                    _state.value = EditorState.Rendering(it)
+                }
                 withContext(worker) { Gallery.saveVideo(ctx, out, name) }
             } finally {
                 out.delete() // 갤러리에 복사했거나 실패·취소됨 — 어느 쪽이든 임시 파일은 필요 없다
