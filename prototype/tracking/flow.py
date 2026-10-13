@@ -8,6 +8,20 @@ import cv2
 import numpy as np
 
 MIN_POINTS = 5
+# 고정 카메라에서 벽은 안 움직인다 — 일부 점이 뚜렷이 움직이면 제자리 점(벽)은 버린다(Kotlin FlowTracker와 같은 기준)
+MOVING_PX = 2.0
+STILL_PX = 0.5
+STILL_RATIO = 0.3
+MOVING_FRACTION = 0.1
+
+
+def _drop_wall_points(shift, alive):
+    """shift: 점별 시작 이후 이동 거리. 움직이는 점이 충분하면 그보다 한참 덜 움직인 점(벽)을 alive에서 뺀다."""
+    moving = shift[alive & (shift >= MOVING_PX)]
+    if len(moving) < MIN_POINTS or len(moving) < alive.sum() * MOVING_FRACTION:
+        return alive
+    kept = alive & (shift >= max(STILL_PX, float(np.median(moving)) * STILL_RATIO))
+    return kept if kept.sum() >= MIN_POINTS else alive  # 버리고 나면 너무 적으면 그대로(추적이 끊기지 않게)
 
 
 def track_points(frames, box, max_points=60, fb_tol=1.0, win=21, iters=30):
@@ -36,6 +50,9 @@ def track_points(frames, box, max_points=60, fb_tol=1.0, win=21, iters=30):
         if alive.sum() < MIN_POINTS:
             break
         cur = nxt
+        alive = _drop_wall_points(np.linalg.norm(cur.reshape(-1, 2) - start, axis=1), alive)
+        if alive.sum() < MIN_POINTS:
+            break
         out[k] = np.median(cur.reshape(-1, 2)[alive] - start[alive], axis=0)
     return out
 

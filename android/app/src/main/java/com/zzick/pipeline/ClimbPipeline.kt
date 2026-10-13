@@ -24,6 +24,7 @@ import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
 import com.zzick.core.analysis.AnalysisResult
 import com.zzick.core.analysis.Analyzer
+import com.zzick.core.analysis.SampleReport
 import com.zzick.core.overlay.CaptureDate
 import com.zzick.core.overlay.OverlayInfo
 import com.zzick.core.quality.SourceInfo
@@ -130,6 +131,7 @@ class ClimbPipeline(private val context: Context) {
         tap: Pair<Double, Double>?,
         isCancelled: () -> Boolean = { false },
         opticalFlow: Boolean = true, // 포즈 공백을 광학 흐름으로 메우기(끄는 건 비교 측정용)
+        onSample: ((SampleReport) -> Unit)? = null, // 진단 기록(추적 점검·문제 신고)
         onProgress: (Float) -> Unit,
     ): Analysis {
         val dec = decoder(uri)
@@ -139,7 +141,7 @@ class ClimbPipeline(private val context: Context) {
             MpPersonDetector(context).use { det ->
                 val analyzer = Analyzer(
                     pose, det, dec.srcWidth.toDouble(), dec.srcHeight.toDouble(), dec.frameRate, stride,
-                    tap = tap, appearance = BitmapAppearance(), gray = if (opticalFlow) BitmapGray() else null,
+                    tap = tap, appearance = BitmapAppearance(), gray = if (opticalFlow) BitmapGray() else null, onSample = onSample, confirmStart = true,
                 )
                 var lastPts = 0L
                 var firstPts = 0L
