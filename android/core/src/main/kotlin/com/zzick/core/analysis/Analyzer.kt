@@ -13,6 +13,12 @@ class PoseCandidate(val x: FloatArray, val y: FloatArray, val visibility: FloatA
 
 interface PoseEstimator<F> {
     fun estimate(frame: F, timestampMs: Long): List<PoseCandidate>
+
+    /**
+     * 사람 박스(프레임 폭/높이 기준 0..1) 주변만 잘라 포즈를 찾는다. 결과 좌표는 프레임 전체 기준 0..1.
+     * 화면 전체에서는 포즈 모델이 다른 것(사람처럼 보이는 홀드 등)을 잡느라 등반자를 못 낼 때 쓴다.
+     */
+    fun estimateCrop(frame: F, box: Box): List<PoseCandidate> = emptyList()
 }
 
 /** 사람 박스. 좌표는 프레임 폭/높이 기준 0..1. */
@@ -46,8 +52,11 @@ class AnalysisResult(
  *   단, 직전 채택 위치에서 물리적으로 불가능한 거리면 버린다 — 등반자를 잠깐 놓친 사이 다른 사람으로 갈아타지 않도록.
  * - 포즈가 비면(빠른 동작·흐린 자세) 마지막 포즈의 몸 박스에서 광학 흐름으로 매 프레임 따라간다(gray가 있을 때).
  *   공백이 시작된 걸 알게 되는 샘플 프레임에서 마지막 포즈 프레임부터 한 번에 따라잡고, 이후로는 매 프레임.
- * - 포즈가 한동안(reacquireGapS 이상) 끊겼다가 다시 잡히면 몸통 색 분포가 등반자와 비슷한지 확인한다
- *   (사용자 제보: 등반자가 화면 밖으로 그네 타는 사이 빨간 홀드를 사람으로 0.4초간 연속 인식).
+ * - 등반자 몸통 색 분포를 익힌 뒤에는 포즈마다 색이 맞는지 확인한다. 색이 다르면 직전 위치 바로 근처이면서
+ *   사람 검출기도 그 자리에 사람을 볼 때만 받는다(사용자 제보: 그네 영상의 빨간 홀드, 20260914_145634의 빨강·파랑 홀드 덩어리 —
+ *   후자는 등반자 바로 옆이라 끊김 없이 이어져 들어왔다). 색 기억은 확실히 맞는 포즈로만 갱신(가짜로 오염되지 않게).
+ * - 화면 전체에서 맞는 포즈가 없으면 사람 검출기 박스 주변만 잘라 다시 찾는다 — 벽을 보고 선 등반자는 포즈 모델이
+ *   화면 전체에선 못 찾고 사람처럼 보이는 홀드를 대신 내는 경우가 있다.
  * 내부 좌표는 Python 프로토타입과 같은 '프레임 높이 = 1' 단위.
  */
 class Analyzer<F>(
@@ -64,8 +73,7 @@ class Analyzer<F>(
     private val jumpBase: Double = 0.05,
     private val appearance: AppearanceExtractor<F>? = null,
     private val minSimilarity: Double = 0.5,
-    private val reacquireGapS: Double = 0.3,
-    private val nearTol: Double = 0.15, // 프레임 높이 — 이 안이면 생김새 확인 생략
+    private val nearTol: Double = 0.15, // 프레임 높이 — 색이 달라도 이 안이고 사람 검출기가 보면 받는다
     private val gray: GrayProvider<F>? = null,
     private val maxFlowS: Double = 3.0, // 이보다 긴 공백은 다음 포즈와 이어질 가능성이 낮아 흐름을 멈춘다(비용 절약)
 ) {
@@ -87,6 +95,8 @@ class Analyzer<F>(
     private var tracker: FlowTracker? = null
     private var trackerSeed = -1
     private var gapTried = -1 // 이 포즈 프레임에서 시작하는 공백은 이미 흐름을 시도함
+    private var detectedAt = -1 // 아래 detectedBoxes를 구한 프레임(한 프레임에 검출기는 한 번만)
+    private var detectedBoxes: List<Box> = emptyList()
 
     /** 이 프레임의 픽셀이 필요한지 — 포즈 추정 프레임이거나 흐름으로 따라가는 중일 때만(나머지는 GPU 읽기 생략). */
     fun needsPixels(index: Int) = index % stride == 0 || tracker != null
@@ -102,7 +112,7 @@ class Analyzer<F>(
             stepFlow(index, frame)
             return
         }
-        val chosen = choose(pose.estimate(frame, ptsUs / 1000), index, frame)
+        val chosen = choose(pose.estimate(frame, ptsUs / 1000), index, frame) ?: aroundPersonBoxes(index, frame)
         if (chosen != null) {
             val t = torsoOf(chosen)
             torso += t
@@ -120,8 +130,8 @@ class Analyzer<F>(
             raw += NAN4
             if (tracker != null) stepFlow(index, frame) else startFlow(index, frame)
         }
-        val frameBoxes = if (chosen == null || (index / stride) % calibEverySamples == 0) {
-            detector.detect(frame).map { Box(it.x0 * aspect, it.y0, it.x1 * aspect, it.y1) }
+        val frameBoxes = if (chosen == null || (index / stride) % calibEverySamples == 0 || detectedAt == index) {
+            detected(frame, index)
         } else {
             emptyList()
         }
@@ -207,17 +217,46 @@ class Analyzer<F>(
     private fun choose(cands: List<PoseCandidate>, index: Int, frame: F): PoseCandidate? {
         val ref = last ?: return cands.firstOrNull()
         fun dist(p: PoseCandidate) = torsoOf(p).let { hypot(it[0] - ref[0], it[1] - ref[1]) }
-        val reachable = cands
+        return cands
             .filter { lastIndex < 0 || dist(it) <= jumpBase + maxSpeed * (index - lastIndex) / fps }
             .sortedBy(::dist)
-        // 공백 뒤 직전 위치에서 먼 곳에서 다시 잡을 때는 생김새도 맞아야 한다(가까운 순으로 처음 맞는 사람).
-        // 직전 위치 근처면 가짜일 가능성이 낮고, 포즈가 살짝 어긋나 색이 달라 보이는 경우가 있어 확인하지 않는다.
-        val reacquiring = lastPoseIndex >= 0 && (index - lastPoseIndex) > reacquireGapS * fps
-        return if (reacquiring) {
-            reachable.firstOrNull { dist(it) <= nearTol || looksLikeClimber(frame, it) }
-        } else {
-            reachable.firstOrNull()
+            .firstOrNull { fits(frame, index, it, dist(it)) }
+    }
+
+    /**
+     * 색이 맞거나(익히기 전이면 무조건), 색이 달라도 직전 위치 바로 근처이면서 사람 검출기가 그 자리에 사람을 볼 때.
+     * 후자는 몸통 추정이 바지 쪽으로 내려가 색이 달라 보이는 진짜 등반자(그네 영상 22.7s) 같은 경우.
+     */
+    private fun fits(frame: F, index: Int, p: PoseCandidate, dist: Double): Boolean {
+        val sim = lookSimilarity(frame, p) ?: return true
+        if (sim >= minSimilarity) return true
+        if (dist > nearTol) return false
+        val t = torsoOf(p)
+        return detected(frame, index).any { t[0] in it.x0..it.x1 && t[1] in it.y0..it.y1 }
+    }
+
+    /** 화면 전체에서 맞는 포즈가 없을 때: 갈 수 있는 거리 안의 사람 박스 주변만 잘라 가까운 순으로 다시 찾는다. */
+    private fun aroundPersonBoxes(index: Int, frame: F): PoseCandidate? {
+        val ref = last ?: return null
+        val allowed = if (lastIndex < 0) Double.MAX_VALUE else jumpBase + maxSpeed * (index - lastIndex) / fps
+        fun dist(b: Box) = hypot(b.cx - ref[0], b.cy - ref[1])
+        return detected(frame, index)
+            .filter { dist(it) <= allowed }
+            .sortedBy(::dist)
+            .take(MAX_CROPS)
+            .firstNotNullOfOrNull { b ->
+                pose.estimateCrop(frame, Box(b.x0 / aspect, b.y0, b.x1 / aspect, b.y1))
+                    .firstOrNull { c -> lookSimilarity(frame, c)?.let { it >= minSimilarity } ?: true }
+            }
+    }
+
+    /** 이 프레임의 사람 박스(높이 정규화 좌표). 검출기는 프레임마다 많아야 한 번. */
+    private fun detected(frame: F, index: Int): List<Box> {
+        if (detectedAt != index) {
+            detectedBoxes = detector.detect(frame).map { Box(it.x0 * aspect, it.y0, it.x1 * aspect, it.y1) }
+            detectedAt = index
         }
+        return detectedBoxes
     }
 
     /** 몸통(어깨·골반) 사각형의 안쪽 — 배경 벽이 섞이지 않게 줄여서 옷 색만 보도록. */
@@ -229,16 +268,19 @@ class Analyzer<F>(
         return Box(xs.min() + inX, ys.min() + inY, xs.max() - inX, ys.max() - inY)
     }
 
-    private fun looksLikeClimber(frame: F, p: PoseCandidate): Boolean {
-        val ref = look ?: return true
-        if (appearance == null || lookSamples < MIN_LOOK_SAMPLES) return true
-        val f = appearance.describe(frame, torsoBox(p)) ?: return true
-        return similarity(ref, f) >= minSimilarity
+    /** 익힌 등반자 색과의 유사도. 아직 못 익혔거나 특징을 못 구하면 null(확인 생략). */
+    private fun lookSimilarity(frame: F, p: PoseCandidate): Double? {
+        val ref = look ?: return null
+        if (appearance == null || lookSamples < MIN_LOOK_SAMPLES) return null
+        val f = appearance.describe(frame, torsoBox(p)) ?: return null
+        return similarity(ref, f)
     }
 
+    /** 채택한 포즈로 색 기억 갱신 — 익히는 중이거나 확실히 맞을 때만(애매한 포즈로 조금씩 오염되지 않게). */
     private fun remember(frame: F, p: PoseCandidate) {
         val f = appearance?.describe(frame, torsoBox(p)) ?: return
         val ref = look
+        if (ref != null && lookSamples >= MIN_LOOK_SAMPLES && similarity(ref, f) < LEARN_SIMILARITY) return
         look = if (ref == null) f.copyOf() else FloatArray(f.size) { ref[it] * (1 - LOOK_ALPHA) + f[it] * LOOK_ALPHA }
         lookSamples++
     }
@@ -275,6 +317,8 @@ class Analyzer<F>(
 
         private const val MIN_LOOK_SAMPLES = 3
         private const val LOOK_ALPHA = 0.2f
+        private const val LEARN_SIMILARITY = 0.6 // 실측: 진짜 등반자 0.7~0.94, 가짜 0.15~0.5
+        private const val MAX_CROPS = 2 // 한 프레임에 잘라서 다시 찾는 사람 박스 수
 
         /** 히스토그램 교집합(둘 다 합 1일 때 0..1). */
         fun similarity(a: FloatArray, b: FloatArray): Double {

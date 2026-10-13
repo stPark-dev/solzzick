@@ -154,8 +154,8 @@ python3 -m venv .venv && .venv/bin/pip install numpy opencv-python-headless scip
 | 테스트 | 개수 |
 |---|---|
 | Python(기준 구현) | 78 |
-| Kotlin JVM(`core`) | 97 |
-| 실기기(Galaxy S23 Ultra) | 58 |
+| Kotlin JVM(`core`) | 98 |
+| 실기기(Galaxy S23 Ultra) | 59 |
 
 모든 기능은 테스트를 먼저 쓰고(실패 확인) 구현했습니다.
 

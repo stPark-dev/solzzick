@@ -26,11 +26,20 @@ class AnalyzerTest {
         return PoseCandidate(xs, ys, FloatArray(33) { vis })
     }
 
-    private class FakePose(val byFrame: (Int) -> List<PoseCandidate>) : PoseEstimator<Int> {
+    private class FakePose(
+        val crop: (Int, Box) -> List<PoseCandidate> = { _, _ -> emptyList() },
+        val byFrame: (Int) -> List<PoseCandidate>,
+    ) : PoseEstimator<Int> {
         val calls = mutableListOf<Int>()
+        val cropCalls = mutableListOf<Int>()
         override fun estimate(frame: Int, timestampMs: Long): List<PoseCandidate> {
             calls += frame
             return byFrame(frame)
+        }
+
+        override fun estimateCrop(frame: Int, box: Box): List<PoseCandidate> {
+            cropCalls += frame
+            return crop(frame, box)
         }
     }
 
@@ -142,9 +151,9 @@ class AnalyzerTest {
     }
 
     @Test
-    fun reacquiredPoseNearLastPositionIsAcceptedEvenIfItLooksDifferent() {
+    fun nearbyPoseThatLooksDifferentIsAcceptedWhenDetectorSeesAPersonThere() {
         // 실측(그네 영상 22.7s): 공백 뒤 등반자를 다시 잡았는데 몸통 추정이 바지 쪽으로 내려가 색이 달라 보임 —
-        // 직전 위치 바로 근처면 가짜일 가능성이 낮으니 받아들인다
+        // 직전 위치 바로 근처이고 사람 검출기도 그 자리에 사람을 보면 받아들인다
         val pose = FakePose { i ->
             when {
                 i < 30 -> listOf(person(0.5f, 0.5f))
@@ -155,23 +164,53 @@ class AnalyzerTest {
         val look = object : com.zzick.core.analysis.AppearanceExtractor<Int> {
             override fun describe(frame: Int, box: Box) = if (frame < 30) floatArrayOf(1f, 0f) else floatArrayOf(0f, 1f)
         }
-        val r = Analyzer(pose, FakeDetector(), w, h, fps, stride = 3, appearance = look)
+        val det = FakeDetector { i -> if (i >= 45) listOf(Box(0.45, 0.33, 0.61, 0.62)) else emptyList() }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, appearance = look)
             .apply { for (i in 0 until 60) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
             .finish(fps)
         assertEquals(Fuse.POSE, r.source[45])
     }
 
     @Test
-    fun appearanceCheckIsSkippedWhileTrackingContinuously() {
-        // 끊김 없이 따라가는 중엔 색이 달라 보여도(조명·가림) 버리지 않는다 — 공백 뒤 다시 잡을 때만 확인
-        val pose = FakePose { i -> listOf(person(0.5f + i * 0.001f, 0.5f)) }
+    fun differentLookIsKeptWhileDetectorKeepsSeeingThePerson() {
+        // 조명·가림으로 색이 달라 보여도, 사람 검출기가 그 자리에 사람을 보는 동안은 버리지 않는다
+        fun x(i: Int) = 0.5 + i * 0.001
+        val pose = FakePose { i -> listOf(person(x(i).toFloat(), 0.5f)) }
         val flipLook = object : com.zzick.core.analysis.AppearanceExtractor<Int> {
             override fun describe(frame: Int, box: Box) = if (frame < 30) floatArrayOf(1f, 0f) else floatArrayOf(0f, 1f)
         }
-        val r = Analyzer(pose, FakeDetector(), w, h, fps, stride = 3, appearance = flipLook)
+        val det = FakeDetector { i -> listOf(Box(x(i) - 0.08, 0.38, x(i) + 0.08, 0.62)) }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, appearance = flipLook)
             .apply { for (i in 0 until 60) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
             .finish(fps)
         for (i in 0 until 60 step 3) assertEquals("frame $i", Fuse.POSE, r.source[i])
+    }
+
+    /** 위치로 색 특징을 흉내: x<0.3 은 빨강·파랑 큰 홀드 덩어리, 그 외는 흰 티셔츠 등반자. */
+    private class HoldClusterLook : com.zzick.core.analysis.AppearanceExtractor<Int> {
+        override fun describe(frame: Int, box: Box): FloatArray =
+            if (box.cx < 0.3) floatArrayOf(0.15f, 0.85f) else floatArrayOf(1f, 0f)
+    }
+
+    @Test
+    fun lookalikeHoldNextToClimberIsRejectedAndClimberIsFoundAroundPersonBox() {
+        // 사용자 제보(20260914_145634): 등반자가 오른쪽으로 크게 움직이자 포즈 모델은 등반자를 놓치고
+        // 바로 옆(직전 위치에서 0.09)의 빨강·파랑 홀드 덩어리를 사람으로 계속 낸다(공백 없이 이어져서 생김새 확인을 건너뜀).
+        // 사람 검출기는 홀드를 사람으로 보지 않고, 6초 뒤부터 등반자를 찾는다 — 그 박스 주변을 잘라 포즈를 찾으면 등반자가 나온다.
+        fun climberX(i: Int) = if (i < 75) 0.36 else minOf(0.54, 0.36 + (i - 75) * 0.002)
+        val pose = FakePose(crop = { i, b -> if (b.cx > 0.45) listOf(person(climberX(i).toFloat(), 0.54f)) else emptyList() }) { i ->
+            if (i < 75) listOf(person(0.36f, 0.54f)) else listOf(person(0.27f, 0.48f))
+        }
+        val det = FakeDetector { i -> if (i >= 180) listOf(Box(climberX(i) - 0.1, 0.44, climberX(i) + 0.1, 0.70)) else emptyList() }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, tap = 0.36 to 0.54, appearance = HoldClusterLook())
+            .apply { for (i in 0 until 270) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 75 until 270) assertTrue("frame $i 홀드를 따라감 x=${r.track[i][0] / w}", r.track[i][0] > 0.32 * w)
+        for (i in 180 until 270 step 3) {
+            assertEquals("frame $i src", Fuse.POSE, r.source[i])
+            assertEquals("frame $i x", climberX(i) * w, r.track[i][0], 0.02 * w)
+        }
+        assertTrue("잘라서 다시 찾기는 사람 박스가 있을 때만", pose.cropCalls.all { it >= 180 })
     }
 
     @Test

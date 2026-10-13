@@ -16,6 +16,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import kotlin.math.abs
 
 @RunWith(AndroidJUnit4::class)
 class PipelineHelpersTest {
@@ -102,5 +103,29 @@ class PipelineHelpersTest {
         val inGap = pts.indices.filter { ((pts[it] - pts[0]) / 1e6) in 8.3..10.4 }
         val flowFrac = inGap.count { a.result.source[it] == com.zzick.core.tracking.Fuse.FLOW }.toDouble() / inGap.size
         assertTrue("흐름으로 메운 비율 ${"%.0f".format(flowFrac * 100)}%", flowFrac >= 0.5)
+    }
+
+    /**
+     * 사용자 제보(20260914_145634.mp4): 등반자가 오른쪽으로 크게 움직인 8초쯤부터, 바로 옆의 빨강·파랑 큰 홀드 덩어리를
+     * 포즈 모델이 사람으로 계속 내고 앱이 그걸 18초 동안 따라갔다. 앱과 같은 경로(사람 찾기 → 여러 명이면 탭 → 분석)로 재현.
+     */
+    @Test
+    fun holdClusterBesideClimberIsNotFollowed() {
+        val src = Uri.fromFile(File(ctx.filesDir, "videos/user_145634.mp4"))
+        val pipeline = ClimbPipeline(ctx)
+        val preview = pipeline.findPeople(src)!!
+        val tap = if (preview.boxes.size > 1) preview.boxes.maxBy { it.height }.center else null
+        val a = pipeline.analyze(src, tap) {}
+        val pts = a.result.ptsUs
+        for (i in pts.indices) {
+            val t = (pts[i] - pts[0]) / 1e6
+            val (x, y) = a.result.track[i]
+            // 홀드 덩어리(실측 몸통 위치 약 375, 665 px)를 포즈로 따라가면 안 된다
+            if (t in 8.0..26.0 && a.result.source[i] == com.zzick.core.tracking.Fuse.POSE) {
+                assertTrue("%.2fs 홀드 덩어리를 등반자로 채택 (%.0f, %.0f)".format(t, x, y), abs(x - 375) > 80 || abs(y - 665) > 80)
+            }
+            // 사람 검출기가 등반자를 찾는 18.5~25.5초에는 등반자(몸통 약 770 px)를 따라가야 한다
+            if (t in 18.5..25.5) assertTrue("%.2fs 추적 위치 %.0f".format(t, x), abs(x - 770) < 130)
+        }
     }
 }

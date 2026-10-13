@@ -17,7 +17,7 @@ import com.zzick.core.tracking.Box
 private fun <T> withDelegateFallback(create: (Delegate) -> T): T =
     runCatching { create(Delegate.GPU) }.getOrElse { create(Delegate.CPU) }
 
-class MpPoseEstimator(context: Context, numPoses: Int) : PoseEstimator<Bitmap>, AutoCloseable {
+class MpPoseEstimator(private val context: Context, numPoses: Int) : PoseEstimator<Bitmap>, AutoCloseable {
     private val landmarker = withDelegateFallback { delegate ->
         PoseLandmarker.createFromOptions(
             context,
@@ -38,7 +38,45 @@ class MpPoseEstimator(context: Context, numPoses: Int) : PoseEstimator<Bitmap>, 
             )
         }
 
-    override fun close() = landmarker.close()
+    /** 잘라낸 영역용(프레임마다 독립 — 앞 프레임 추적에 끌려가지 않게 IMAGE 모드). 필요할 때만 만든다. */
+    private val cropLandmarker by lazy {
+        withDelegateFallback { delegate ->
+            PoseLandmarker.createFromOptions(
+                context,
+                PoseLandmarker.PoseLandmarkerOptions.builder()
+                    .setBaseOptions(BaseOptions.builder().setModelAssetPath("pose_landmarker_full.task").setDelegate(delegate).build())
+                    .setRunningMode(RunningMode.IMAGE)
+                    .setNumPoses(1)
+                    .build(),
+            )
+        }
+    }
+    private var cropUsed = false
+
+    override fun estimateCrop(frame: Bitmap, box: Box): List<PoseCandidate> {
+        // 사람 박스보다 넉넉한 정사각형(팔다리가 박스 밖으로 나가도 잡히게)
+        val side = maxOf((box.x1 - box.x0) * frame.width, (box.y1 - box.y0) * frame.height) * 1.4
+        val x0 = (box.cx * frame.width - side / 2).toInt().coerceIn(0, frame.width - 1)
+        val y0 = (box.cy * frame.height - side / 2).toInt().coerceIn(0, frame.height - 1)
+        val x1 = (box.cx * frame.width + side / 2).toInt().coerceIn(x0 + 1, frame.width)
+        val y1 = (box.cy * frame.height + side / 2).toInt().coerceIn(y0 + 1, frame.height)
+        val crop = Bitmap.createBitmap(frame, x0, y0, x1 - x0, y1 - y0)
+        cropUsed = true
+        val sx = (x1 - x0).toFloat() / frame.width
+        val sy = (y1 - y0).toFloat() / frame.height
+        return cropLandmarker.detect(BitmapImageBuilder(crop).build()).landmarks().map { lms ->
+            PoseCandidate(
+                FloatArray(lms.size) { x0.toFloat() / frame.width + lms[it].x() * sx },
+                FloatArray(lms.size) { y0.toFloat() / frame.height + lms[it].y() * sy },
+                FloatArray(lms.size) { lms[it].visibility().orElse(0f) },
+            )
+        }.also { if (crop !== frame) crop.recycle() }
+    }
+
+    override fun close() {
+        landmarker.close()
+        if (cropUsed) cropLandmarker.close()
+    }
 }
 
 class MpPersonDetector(context: Context) : PersonDetector<Bitmap>, AutoCloseable {
