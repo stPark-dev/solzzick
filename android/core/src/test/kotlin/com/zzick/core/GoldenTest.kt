@@ -43,6 +43,7 @@ class GoldenTest {
         zeta = o.getDouble("zeta"),
         delayS = o.getDouble("delay_s"),
         leadS = o.optDouble("lead_s", 0.0), // 미리 겨누기 전에 만든 기준값엔 없다
+        driftCalmSpeed = o.optDouble("drift_calm_speed", 0.0), // 빠른 이동 중 드리프트 줄이기 전에 만든 기준값엔 없다
         driftX = o.getDouble("drift_x"),
         driftY = o.getDouble("drift_y"),
         driftHz = o.getDouble("drift_hz"),

@@ -143,4 +143,28 @@ class VirtualCameraTest {
         val dz = still.deadzoneX * h / still.zoom
         for (i in 100 until 165) assertTrue("frame $i off=${path[i][0] - track[i][0]}", abs(path[i][0] - track[i][0]) <= dz + 5)
     }
+
+    private val handheld = CameraParams(shakeGain = 0.0, motionZoom = false) // 느린 프레이밍 드리프트는 켠 상태
+
+    private fun fastTraverse(): Array<DoubleArray> = traverse(speed = -360.0, x0 = 1150.0).also { t -> t.forEach { it[0] = maxOf(it[0], 400.0) } } // 원본 가장자리에 막히지 않게
+
+    /** 사용자 제보(20260801_161145): 손으로 찍은 느낌의 느린 드리프트(±3%) 때문에 빠르게 옮겨 갈 때도 가운데에서 벗어난다. */
+    @Test
+    fun driftPullsClimberOffCenterDuringFastMove() {
+        val track = fastTraverse()
+        val plain = VirtualCamera.solvePath(track, fps, w, h, handheld.copy(driftCalmSpeed = 0.0))
+        val nodrift = VirtualCamera.solvePath(track, fps, w, h, handheld.copy(driftX = 0.0, driftY = 0.0))
+        assertTrue((75 until 105).maxOf { abs(plain[it][0] - nodrift[it][0]) } > 10)
+    }
+
+    /** 빠른 이동 중엔 드리프트를 빼 가운데를 지키고, 서 있을 땐 손으로 찍은 느낌을 그대로 둔다. */
+    @Test
+    fun driftFadesDuringFastMoveAndStaysWhenStill() {
+        val track = fastTraverse()
+        val calm = VirtualCamera.solvePath(track, fps, w, h, handheld)
+        val nodrift = VirtualCamera.solvePath(track, fps, w, h, handheld.copy(driftX = 0.0, driftY = 0.0))
+        for (i in 75 until 105) for (c in 0..1) assertEquals("frame $i", nodrift[i][c], calm[i][c], 1.0)
+        val plain = VirtualCamera.solvePath(track, fps, w, h, handheld.copy(driftCalmSpeed = 0.0))
+        for (i in 0 until 20) assertArrayEquals(plain[i], calm[i], 1e-9)
+    }
 }

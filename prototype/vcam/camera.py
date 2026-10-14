@@ -28,6 +28,7 @@ class CameraParams:
     drift_x: float = 0.03  # 느린 프레이밍 드리프트 RMS
     drift_y: float = 0.02
     drift_hz: float = 0.1
+    drift_calm_speed: float = 0.25  # 몸통 속도(프레임 높이/초)가 이 이상이면 드리프트를 뺀다(빠른 이동은 가운데에). 0이면 끔
     shake_gain: float = 1.0  # 0이면 짐벌 느낌
     shake_x: float = 0.0007  # 손떨림 RMS (gain 1 기준)
     shake_y: float = 0.0003
@@ -127,6 +128,18 @@ def _fit_heights(path, body, fps, src_w, src_h, p, base):
     return _smooth_heights(need, fps, p)
 
 
+def _drift_scale(track, fps, src_h, p):
+    """프레임별 드리프트 배율(0..1): 빠르게 움직일수록 줄여 가운데를 지킨다. 움직이기 조금 전(미리 겨누는 만큼)부터 줄이고 1초에 걸쳐 부드럽게."""
+    if p.drift_calm_speed <= 0:
+        return 1.0
+    k = max(1, int(round(p.speed_smooth_s * fps)))
+    sm = np.stack([uniform_filter1d(track[:, i] / src_h, k, mode="nearest") for i in range(2)], axis=1)
+    speed = np.linalg.norm(np.gradient(sm, axis=0), axis=1) * fps
+    scale = np.clip(1 - speed / p.drift_calm_speed, 0.0, 1.0)
+    scale = minimum_filter1d(scale, 2 * max(1, int(round(p.lead_s * fps))) + 1, mode="nearest")
+    return uniform_filter1d(scale, max(1, int(round(fps))), mode="nearest")
+
+
 def _solve(track, fps, src_w, src_h, p, ch, ch0):
     """크롭 높이 곡선 ch(프레임별)가 주어졌을 때의 카메라 경로. 데드존은 기본 높이 ch0 기준."""
     n = len(track)
@@ -140,8 +153,9 @@ def _solve(track, fps, src_w, src_h, p, ch, ch0):
     def noise(amp, hz, channel):
         return amp * ch * smooth_noise(n, fps, hz, seed=p.seed * 16 + channel) if amp > 0 else 0.0
 
-    cx = cx + noise(p.drift_x, p.drift_hz, 0) + noise(p.shake_gain * p.shake_x, p.shake_hz, 2)
-    cy = cy + noise(p.drift_y, p.drift_hz, 1) + noise(p.shake_gain * p.shake_y, p.shake_hz, 3)
+    calm = _drift_scale(track, fps, src_h, p)
+    cx = cx + calm * noise(p.drift_x, p.drift_hz, 0) + noise(p.shake_gain * p.shake_x, p.shake_hz, 2)
+    cy = cy + calm * noise(p.drift_y, p.drift_hz, 1) + noise(p.shake_gain * p.shake_y, p.shake_hz, 3)
     rot = np.zeros(n)
     if p.shake_gain * p.shake_roll_deg > 0:
         rot = p.shake_gain * p.shake_roll_deg * smooth_noise(n, fps, p.shake_hz, seed=p.seed * 16 + 4)

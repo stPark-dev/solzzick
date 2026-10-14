@@ -28,6 +28,7 @@ data class CameraParams(
     val driftX: Double = 0.03, // 느린 프레이밍 드리프트 RMS
     val driftY: Double = 0.02,
     val driftHz: Double = 0.1,
+    val driftCalmSpeed: Double = 0.25, // 몸통 속도(프레임 높이/초)가 이 이상이면 드리프트를 뺀다(빠른 이동은 가운데에). 0이면 끔
     val shakeGain: Double = 1.0, // 0이면 짐벌 느낌
     val shakeX: Double = 0.0007, // 손떨림 RMS (gain 1 기준)
     val shakeY: Double = 0.0003,
@@ -182,6 +183,21 @@ object VirtualCamera {
         return smoothHeights(need, fps, p)
     }
 
+    /**
+     * 프레임별 드리프트 배율(0..1, null이면 1): 빠르게 움직일수록 줄여 가운데를 지킨다.
+     * 움직이기 조금 전(미리 겨누는 만큼)부터 줄이고 1초에 걸쳐 부드럽게.
+     */
+    private fun driftScale(track: Array<DoubleArray>, fps: Double, srcH: Double, p: CameraParams): DoubleArray? {
+        if (p.driftCalmSpeed <= 0) return null
+        val n = track.size
+        val k = max(1, Math.rint(p.speedSmoothS * fps).toInt())
+        val gx = gradient(uniform(DoubleArray(n) { track[it][0] / srcH }, k))
+        val gy = gradient(uniform(DoubleArray(n) { track[it][1] / srcH }, k))
+        val scale = DoubleArray(n) { (1 - hypot(gx[it], gy[it]) * fps / p.driftCalmSpeed).coerceIn(0.0, 1.0) }
+        val early = slide(scale, 2 * max(1, Math.rint(p.leadS * fps).toInt()) + 1, ::min)
+        return uniform(early, max(1, Math.rint(fps).toInt()))
+    }
+
     private fun solve(
         track: Array<DoubleArray>, fps: Double, srcW: Double, srcH: Double,
         p: CameraParams, ch: DoubleArray, ch0: Double,
@@ -193,14 +209,15 @@ object VirtualCamera {
         val cx = Follow.simulate(tx, fps, p.omega, p.zeta, p.delayS - p.leadS, deadzone = p.deadzoneX * ch0)
         val cy = Follow.simulate(ty, fps, p.omega, p.zeta, p.delayS - p.leadS, deadzone = p.deadzoneY * ch0)
 
-        fun addNoise(dst: DoubleArray, amp: Double, hz: Double, channel: Int) {
+        fun addNoise(dst: DoubleArray, amp: Double, hz: Double, channel: Int, scale: DoubleArray? = null) {
             if (amp <= 0) return
             val nz = Noise.smooth(n, fps, hz, seed = p.seed * 16L + channel)
-            for (i in 0 until n) dst[i] += amp * ch[i] * nz[i]
+            for (i in 0 until n) dst[i] += (scale?.get(i) ?: 1.0) * amp * ch[i] * nz[i]
         }
-        addNoise(cx, p.driftX, p.driftHz, 0)
+        val calm = driftScale(track, fps, srcH, p)
+        addNoise(cx, p.driftX, p.driftHz, 0, calm)
         addNoise(cx, p.shakeGain * p.shakeX, p.shakeHz, 2)
-        addNoise(cy, p.driftY, p.driftHz, 1)
+        addNoise(cy, p.driftY, p.driftHz, 1, calm)
         addNoise(cy, p.shakeGain * p.shakeY, p.shakeHz, 3)
         val rollAmp = p.shakeGain * p.shakeRollDeg
         val roll = if (rollAmp > 0) Noise.smooth(n, fps, p.shakeHz, seed = p.seed * 16L + 4) else null

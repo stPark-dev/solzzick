@@ -24,6 +24,8 @@ CAMERA_CASES = {
     "portrait45_shake3": {"aspect": 4 / 5, "out_height": 1350, "shake_gain": 3.0},
     "no_motion_zoom": {"motion_zoom": False},
     "fps60_style_even_windows": {"crux_window_s": 2.0, "speed_smooth_s": 0.2, "move_hold_s": 0.4},
+    "lead_calm": {},  # 0.4.x: 미리 겨누기 + 빠른 이동 중 드리프트 줄이기(기본값)
+    "lead_calm_strict": {"lead_s": 0.5, "drift_calm_speed": 0.1, "seed": 2},
 }
 
 

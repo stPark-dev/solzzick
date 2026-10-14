@@ -315,3 +315,26 @@ def test_short_pause_does_not_pulse_the_zoom():
     assert bumpy[:, 3].min() < base * 0.97  # 규칙이 없으면 짧게 타이트해짐(이 상황을 재현하는지 확인)
     path = solve_path(track, FPS, W, H, MOTION)
     assert path[:, 3].min() > base * 0.98
+
+
+HANDHELD = replace(CameraParams(), shake_gain=0.0, motion_zoom=False)  # 느린 프레이밍 드리프트는 켠 상태
+
+
+def test_drift_pulls_climber_off_center_during_fast_move():
+    """사용자 제보(20260801_161145): 손으로 찍은 느낌의 느린 드리프트(±3%) 때문에 빠르게 옮겨 갈 때도 가운데에서 벗어난다."""
+    track = traverse(speed=-360.0, x0=1150.0)
+    track[:, 0] = np.maximum(track[:, 0], 400)  # 원본 가장자리에 막히지 않게
+    plain = solve_path(track, FPS, W, H, replace(HANDHELD, drift_calm_speed=0.0))
+    nodrift = solve_path(track, FPS, W, H, replace(HANDHELD, drift_x=0.0, drift_y=0.0))
+    assert np.max(np.abs(plain[75:105, 0] - nodrift[75:105, 0])) > 10
+
+
+def test_drift_fades_during_fast_move_and_stays_when_still():
+    """빠른 이동 중엔 드리프트를 빼 가운데를 지키고, 서 있을 땐 손으로 찍은 느낌을 그대로 둔다."""
+    track = traverse(speed=-360.0, x0=1150.0)
+    track[:, 0] = np.maximum(track[:, 0], 400)
+    calm = solve_path(track, FPS, W, H, HANDHELD)
+    nodrift = solve_path(track, FPS, W, H, replace(HANDHELD, drift_x=0.0, drift_y=0.0))
+    np.testing.assert_allclose(calm[75:105, :2], nodrift[75:105, :2], atol=1.0)  # 이동 중: 드리프트 없음
+    plain = solve_path(track, FPS, W, H, replace(HANDHELD, drift_calm_speed=0.0))
+    np.testing.assert_allclose(calm[:20], plain[:20])  # 이동 2초 전: 그대로
