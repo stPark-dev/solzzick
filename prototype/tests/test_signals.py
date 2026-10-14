@@ -160,3 +160,19 @@ def test_simulate_follow_delay_independent_of_fps():
         y = simulate_follow(target, fps, omega=20.0, zeta=1.0, delay_s=0.2)
         starts.append(np.argmax(y > 1e-9) / fps)
     assert starts == pytest.approx([1.2, 1.2], abs=1e-9)  # 지연 외에 프레임 하나를 더 얹지 않는다
+
+
+def test_negative_delay_looks_ahead_and_holds_last_value():
+    """미리 겨누기(음수 지연): 앞의 목표를 보고, 끝을 넘으면 마지막 값으로 유지."""
+    from vcam.follow import _delayed
+    x = np.arange(10, dtype=float)
+    np.testing.assert_allclose(_delayed(x, FPS, -2 / FPS), [2, 3, 4, 5, 6, 7, 8, 9, 9, 9])
+
+
+def test_follow_with_look_ahead_has_no_start_wobble():
+    """처음부터 움직이는 목표를 앞당겨 따라갈 때, 시작에서 목표와 어긋난 채 출발해 출렁이지 않는다."""
+    target = 100 + 10.0 * np.arange(60)
+    y = simulate_follow(target, FPS, omega=8.0, zeta=0.9, delay_s=-0.2)
+    lag = (target + 10.0 * 0.2 * FPS) - y  # 앞당긴 목표와의 차이
+    assert np.all(np.diff(lag[:20]) >= -1e-9)  # 0에서 정상 상태 뒤처짐으로 한 방향으로만 늘어난다
+

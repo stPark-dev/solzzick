@@ -86,11 +86,35 @@ def test_large_vertical_motion_is_followed_up_to_deadzone_edge():
 
 
 def test_follow_is_delayed():
+    p = replace(STILL, lead_s=0.0)
     track = static_track(500, 720)
     track[100:, 0] = 900
+    path = solve_path(track, FPS, W, H, p)
+    assert path[100 + int(p.delay_s * FPS) - 1, 0] == pytest.approx(path[99, 0])
+    assert path[-1, 0] == pytest.approx(900 - p.deadzone_x * H / p.zoom, abs=0.5)
+
+
+def traverse(n=300, x0=1100.0, speed=-180.0):
+    """2초 서 있다가 왼쪽으로 일정한 속도(px/s)로 4초 이동, 다시 멈춤."""
+    t = np.arange(n) / FPS
+    x = x0 + speed * np.clip(t - 2.0, 0, 4.0)
+    return np.stack([x, np.full(n, 720.0)], axis=1)
+
+
+def test_steady_traverse_lags_without_lead():
+    """사용자 제보(20260801_161145): 줄을 잡고 옆으로 이동할 때 등반자가 늘 가운데가 아니다 — 반응 지연+스프링으로 0.3초쯤 뒤처짐."""
+    track = traverse()
+    path = solve_path(track, FPS, W, H, replace(STILL, lead_s=0.0))
+    lag = path[120:180, 0] - track[120:180, 0]  # 이동 중반(3~5초)
+    assert np.mean(lag) > 50
+
+
+def test_steady_traverse_is_centered_with_lead():
+    """오프라인이라 앞으로 갈 곳을 안다 — 그만큼 앞을 겨누면 일정한 속도의 이동에서 가운데를 지킨다(데드존만큼만 차이)."""
+    track = traverse()
     path = solve_path(track, FPS, W, H, STILL)
-    assert path[100 + int(STILL.delay_s * FPS) - 1, 0] == pytest.approx(path[99, 0])
-    assert path[-1, 0] == pytest.approx(900 - STILL.deadzone_x * H / STILL.zoom, abs=0.5)
+    off = np.abs(path[100:165, 0] - track[100:165, 0])  # 일정한 속도 구간(멈출 곳이 미리 보이기 전)
+    assert np.max(off) <= STILL.deadzone_x * H / STILL.zoom + 5
 
 
 # --- bounds ---
@@ -291,3 +315,48 @@ def test_short_pause_does_not_pulse_the_zoom():
     assert bumpy[:, 3].min() < base * 0.97  # 규칙이 없으면 짧게 타이트해짐(이 상황을 재현하는지 확인)
     path = solve_path(track, FPS, W, H, MOTION)
     assert path[:, 3].min() > base * 0.98
+
+
+HANDHELD = replace(CameraParams(), shake_gain=0.0, motion_zoom=False, seed=4)  # 드리프트는 켠 상태(이동 구간에서 드리프트가 큰 시드)
+
+
+def test_drift_pulls_climber_off_center_during_fast_move():
+    """사용자 제보(20260801_161145): 손으로 찍은 느낌의 느린 드리프트(±3%) 때문에 빠르게 옮겨 갈 때도 가운데에서 벗어난다."""
+    track = traverse(speed=-450.0, x0=1250.0)
+    track[:, 0] = np.maximum(track[:, 0], 400)  # 원본 가장자리에 막히지 않게
+    plain = solve_path(track, FPS, W, H, replace(HANDHELD, drift_calm_speed=0.0))
+    nodrift = solve_path(track, FPS, W, H, replace(HANDHELD, drift_x=0.0, drift_y=0.0))
+    assert np.min(np.abs(plain[75:100, 0] - nodrift[75:100, 0])) > 20
+
+
+def test_drift_fades_during_fast_move_and_stays_when_still():
+    """빠른 이동 중(기준 속도 이상)엔 드리프트를 빼 가운데를 지키고, 서 있을 땐 손으로 찍은 느낌을 그대로 둔다."""
+    track = traverse(speed=-450.0, x0=1250.0)
+    track[:, 0] = np.maximum(track[:, 0], 400)
+    calm = solve_path(track, FPS, W, H, HANDHELD)
+    nodrift = solve_path(track, FPS, W, H, replace(HANDHELD, drift_x=0.0, drift_y=0.0))
+    np.testing.assert_allclose(calm[75:100, :2], nodrift[75:100, :2], atol=1.0)  # 이동 중: 드리프트 없음
+    plain = solve_path(track, FPS, W, H, replace(HANDHELD, drift_calm_speed=0.0))
+    np.testing.assert_allclose(calm[:20], plain[:20])  # 이동 2초 전: 그대로
+
+
+def test_drift_is_partly_kept_at_moderate_speed():
+    """기준의 절반 속도면 드리프트도 절반쯤 남는다(서서히 줄어든다)."""
+    track = traverse(speed=-180.0)  # 0.125 H/s = 기준(0.25)의 절반
+    calm = solve_path(track, FPS, W, H, HANDHELD)
+    plain = solve_path(track, FPS, W, H, replace(HANDHELD, drift_calm_speed=0.0))
+    nodrift = solve_path(track, FPS, W, H, replace(HANDHELD, drift_x=0.0, drift_y=0.0))
+    kept = (calm[100:150, 0] - nodrift[100:150, 0]) / (plain[100:150, 0] - nodrift[100:150, 0])
+    assert np.all(np.abs(kept - 0.5) < 0.05)
+
+
+def test_zero_lead_does_not_fade_drift_early():
+    """미리 겨누기를 끄면(lead 0) 드리프트도 미리 줄이지 않는다 — 1초 평활만."""
+    from vcam.camera import _drift_scale
+    track = traverse(speed=-450.0, x0=1250.0)
+    a = _drift_scale(track, FPS, H, replace(HANDHELD, lead_s=0.0))
+    from scipy.ndimage import uniform_filter1d
+    k = int(round(HANDHELD.speed_smooth_s * FPS))
+    sm = np.stack([uniform_filter1d(track[:, i] / H, k, mode="nearest") for i in range(2)], axis=1)
+    raw = np.clip(1 - np.linalg.norm(np.gradient(sm, axis=0), axis=1) * FPS / HANDHELD.drift_calm_speed, 0, 1)
+    np.testing.assert_allclose(a, uniform_filter1d(raw, int(round(FPS)), mode="nearest"))

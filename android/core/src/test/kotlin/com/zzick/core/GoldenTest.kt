@@ -42,6 +42,8 @@ class GoldenTest {
         omega = o.getDouble("omega"),
         zeta = o.getDouble("zeta"),
         delayS = o.getDouble("delay_s"),
+        leadS = o.getDouble("lead_s"),
+        driftCalmSpeed = o.getDouble("drift_calm_speed"),
         driftX = o.getDouble("drift_x"),
         driftY = o.getDouble("drift_y"),
         driftHz = o.getDouble("drift_hz"),

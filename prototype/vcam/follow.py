@@ -5,6 +5,7 @@ import numpy as np
 
 
 def _delayed(target, fps, delay_s):
+    """delay_s초 늦춘 target(음수면 앞당김). 범위 밖은 처음·마지막 값으로 유지."""
     t = np.arange(len(target))
     return np.interp(t - delay_s * fps, t, target, left=target[0])
 
@@ -16,7 +17,7 @@ def simulate_follow(target, fps, omega, zeta, delay_s, deadzone=0.0, substeps=8)
     xd = _delayed(np.asarray(target, float), fps, delay_s)
     substeps = max(substeps, math.ceil(omega / fps / 0.25))  # ω·dt ≤ 0.25 로 적분 안정성 확보
     dt = 1.0 / fps / substeps
-    g = y = float(target[0])
+    g = y = float(xd[0])  # 앞당긴(음수 지연) 목표에서 출발 — target[0]에서 출발하면 시작에 출렁인다
     v = 0.0
     out = np.empty(len(xd))
     out[0] = y
