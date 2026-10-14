@@ -24,6 +24,7 @@ data class CameraParams(
     val omega: Double = 8.0,
     val zeta: Double = 0.9,
     val delayS: Double = 0.1,
+    val leadS: Double = 0.3, // 앞으로 갈 곳을 이만큼 미리 겨눔 — 반응 지연+스프링의 뒤처짐(약 0.3초)을 상쇄(오프라인이라 가능)
     val driftX: Double = 0.03, // 느린 프레이밍 드리프트 RMS
     val driftY: Double = 0.02,
     val driftHz: Double = 0.1,
@@ -188,8 +189,9 @@ object VirtualCamera {
         val n = track.size
         val tx = DoubleArray(n) { track[it][0] }
         val ty = DoubleArray(n) { track[it][1] - p.headroom * ch[it] }
-        val cx = Follow.simulate(tx, fps, p.omega, p.zeta, p.delayS, deadzone = p.deadzoneX * ch0)
-        val cy = Follow.simulate(ty, fps, p.omega, p.zeta, p.delayS, deadzone = p.deadzoneY * ch0)
+        // 미리 겨누기는 지연을 그만큼 당기는 것과 같다(음수면 앞의 목표를 본다)
+        val cx = Follow.simulate(tx, fps, p.omega, p.zeta, p.delayS - p.leadS, deadzone = p.deadzoneX * ch0)
+        val cy = Follow.simulate(ty, fps, p.omega, p.zeta, p.delayS - p.leadS, deadzone = p.deadzoneY * ch0)
 
         fun addNoise(dst: DoubleArray, amp: Double, hz: Double, channel: Int) {
             if (amp <= 0) return

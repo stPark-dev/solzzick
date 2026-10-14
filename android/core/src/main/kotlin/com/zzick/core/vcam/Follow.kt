@@ -6,7 +6,7 @@ import kotlin.math.max
 
 /** 사람 카메라맨 추종 모델: 반응 지연 + 데드존 + 2차 스프링-댐퍼. (prototype/vcam/follow.py) */
 object Follow {
-    /** target을 delayS초 늦춘 신호. 시작 이전은 target[0]으로 유지. */
+    /** target을 delayS초 늦춘 신호(음수면 앞당김). 범위 밖은 처음·마지막 값으로 유지. */
     internal fun delayed(target: DoubleArray, fps: Double, delayS: Double): DoubleArray {
         val shift = delayS * fps
         val last = target.size - 1

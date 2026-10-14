@@ -86,11 +86,35 @@ def test_large_vertical_motion_is_followed_up_to_deadzone_edge():
 
 
 def test_follow_is_delayed():
+    p = replace(STILL, lead_s=0.0)
     track = static_track(500, 720)
     track[100:, 0] = 900
+    path = solve_path(track, FPS, W, H, p)
+    assert path[100 + int(p.delay_s * FPS) - 1, 0] == pytest.approx(path[99, 0])
+    assert path[-1, 0] == pytest.approx(900 - p.deadzone_x * H / p.zoom, abs=0.5)
+
+
+def traverse(n=300, x0=1100.0, speed=-180.0):
+    """2초 서 있다가 왼쪽으로 일정한 속도(px/s)로 4초 이동, 다시 멈춤."""
+    t = np.arange(n) / FPS
+    x = x0 + speed * np.clip(t - 2.0, 0, 4.0)
+    return np.stack([x, np.full(n, 720.0)], axis=1)
+
+
+def test_steady_traverse_lags_without_lead():
+    """사용자 제보(20260801_161145): 줄을 잡고 옆으로 이동할 때 등반자가 늘 가운데가 아니다 — 반응 지연+스프링으로 0.3초쯤 뒤처짐."""
+    track = traverse()
+    path = solve_path(track, FPS, W, H, replace(STILL, lead_s=0.0))
+    lag = path[120:180, 0] - track[120:180, 0]  # 이동 중반(3~5초)
+    assert np.mean(lag) > 50
+
+
+def test_steady_traverse_is_centered_with_lead():
+    """오프라인이라 앞으로 갈 곳을 안다 — 그만큼 앞을 겨누면 일정한 속도의 이동에서 가운데를 지킨다(데드존만큼만 차이)."""
+    track = traverse()
     path = solve_path(track, FPS, W, H, STILL)
-    assert path[100 + int(STILL.delay_s * FPS) - 1, 0] == pytest.approx(path[99, 0])
-    assert path[-1, 0] == pytest.approx(900 - STILL.deadzone_x * H / STILL.zoom, abs=0.5)
+    off = np.abs(path[100:165, 0] - track[100:165, 0])  # 일정한 속도 구간(멈출 곳이 미리 보이기 전)
+    assert np.max(off) <= STILL.deadzone_x * H / STILL.zoom + 5
 
 
 # --- bounds ---

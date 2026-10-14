@@ -119,4 +119,28 @@ class VirtualCameraTest {
         assertTrue(bumpy.minOf { it[3] } < base * 0.97)
         assertTrue(VirtualCamera.solvePath(track, fps, w, h, motion).minOf { it[3] } > base * 0.98)
     }
+
+    /** 2초 서 있다가 왼쪽으로 일정한 속도(px/s)로 4초 이동, 다시 멈춤. (prototype tests/test_vcam.py traverse) */
+    private fun traverse(n: Int = 300, x0: Double = 1100.0, speed: Double = -180.0) =
+        Array(n) { i -> doubleArrayOf(x0 + speed * ((i / fps) - 2.0).coerceIn(0.0, 4.0), 720.0) }
+
+    private val still = CameraParams(driftX = 0.0, driftY = 0.0, shakeGain = 0.0, motionZoom = false)
+
+    /** 사용자 제보(20260801_161145): 줄을 잡고 옆으로 이동할 때 등반자가 늘 가운데가 아니다 — 반응 지연+스프링으로 0.3초쯤 뒤처짐. */
+    @Test
+    fun steadyTraverseLagsWithoutLead() {
+        val track = traverse()
+        val path = VirtualCamera.solvePath(track, fps, w, h, still.copy(leadS = 0.0))
+        val lag = (120 until 180).map { path[it][0] - track[it][0] }.average()
+        assertTrue("lag=$lag", lag > 50)
+    }
+
+    /** 오프라인이라 앞으로 갈 곳을 안다 — 그만큼 앞을 겨누면 일정한 속도의 이동에서 가운데를 지킨다(데드존만큼만 차이). */
+    @Test
+    fun steadyTraverseIsCenteredWithLead() {
+        val track = traverse()
+        val path = VirtualCamera.solvePath(track, fps, w, h, still)
+        val dz = still.deadzoneX * h / still.zoom
+        for (i in 100 until 165) assertTrue("frame $i off=${path[i][0] - track[i][0]}", abs(path[i][0] - track[i][0]) <= dz + 5)
+    }
 }

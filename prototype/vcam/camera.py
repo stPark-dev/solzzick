@@ -24,6 +24,7 @@ class CameraParams:
     omega: float = 8.0
     zeta: float = 0.9
     delay_s: float = 0.1
+    lead_s: float = 0.3  # 앞으로 갈 곳을 이만큼 미리 겨눔 — 반응 지연+스프링의 뒤처짐(약 0.3초)을 상쇄(오프라인이라 가능)
     drift_x: float = 0.03  # 느린 프레이밍 드리프트 RMS
     drift_y: float = 0.02
     drift_hz: float = 0.1
@@ -132,8 +133,9 @@ def _solve(track, fps, src_w, src_h, p, ch, ch0):
     cw = ch * p.aspect
     tx = track[:, 0]
     ty = track[:, 1] - p.headroom * ch
-    cx = simulate_follow(tx, fps, p.omega, p.zeta, p.delay_s, deadzone=p.deadzone_x * ch0)
-    cy = simulate_follow(ty, fps, p.omega, p.zeta, p.delay_s, deadzone=p.deadzone_y * ch0)
+    # 미리 겨누기는 지연을 그만큼 당기는 것과 같다(음수면 앞의 목표를 본다)
+    cx = simulate_follow(tx, fps, p.omega, p.zeta, p.delay_s - p.lead_s, deadzone=p.deadzone_x * ch0)
+    cy = simulate_follow(ty, fps, p.omega, p.zeta, p.delay_s - p.lead_s, deadzone=p.deadzone_y * ch0)
 
     def noise(amp, hz, channel):
         return amp * ch * smooth_noise(n, fps, hz, seed=p.seed * 16 + channel) if amp > 0 else 0.0

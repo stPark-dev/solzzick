@@ -5,6 +5,7 @@ import numpy as np
 
 
 def _delayed(target, fps, delay_s):
+    """delay_s초 늦춘 target(음수면 앞당김). 범위 밖은 처음·마지막 값으로 유지."""
     t = np.arange(len(target))
     return np.interp(t - delay_s * fps, t, target, left=target[0])
 

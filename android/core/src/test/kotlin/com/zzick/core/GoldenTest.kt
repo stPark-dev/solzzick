@@ -42,6 +42,7 @@ class GoldenTest {
         omega = o.getDouble("omega"),
         zeta = o.getDouble("zeta"),
         delayS = o.getDouble("delay_s"),
+        leadS = o.optDouble("lead_s", 0.0), // 미리 겨누기 전에 만든 기준값엔 없다
         driftX = o.getDouble("drift_x"),
         driftY = o.getDouble("drift_y"),
         driftHz = o.getDouble("drift_hz"),
