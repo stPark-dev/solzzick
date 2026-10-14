@@ -65,6 +65,14 @@ class StoreCodecTest {
         assertNull(AnalysisCodec.read(ByteArrayInputStream(bytes)))
     }
 
+    /** 0.4.0에서 등반자 고르는 방식이 또 바뀌었다(첫 포즈·다시 잡기 확인, 고르기 화면 프레임) — 버전 2 저장본도 버린다. */
+    @Test
+    fun analysesSavedBefore040AreDiscarded() {
+        val bytes = ByteArrayOutputStream().also { AnalysisCodec.write(record(null, null), it) }.toByteArray()
+        java.nio.ByteBuffer.wrap(bytes).putInt(4, 2) // 버전 2로 저장된 파일
+        assertNull(AnalysisCodec.read(ByteArrayInputStream(bytes)))
+    }
+
     /** 깨진 저장본의 프레임 수가 터무니없으면 메모리를 잡기 전에 거절(1시간 60fps = 21.6만 프레임). */
     @Test
     fun absurdFrameCountIsRejected() {

@@ -184,6 +184,7 @@ class FlowTracker(
         }
         prev = np
         cur = moved
+        dropWallPoints()
         if (alive.count { it } < minPoints) return null
         val dx = alive.indices.filter { alive[it] }.map { cur[2 * it] - start[2 * it] }
         val dy = alive.indices.filter { alive[it] }.map { cur[2 * it + 1] - start[2 * it + 1] }
@@ -316,6 +317,23 @@ class FlowTracker(
         return DoubleArray(picked.size * 2) { if (it % 2 == 0) picked[it / 2].first.toDouble() else picked[it / 2].second.toDouble() }
     }
 
+    /**
+     * 고정 카메라에서 벽(배경)은 움직이지 않는다. 몸 박스에서 고른 점 중 일부가 뚜렷이 움직이기 시작하면(등반자),
+     * 시작 위치에 그대로인 점(벽)은 버린다 — 박스 대부분이 벽이면 중앙값이 0에 붙어 카메라가 멈추던 문제.
+     * 모두 그대로면(등반자가 쉬는 중) 아무것도 버리지 않는다.
+     */
+    private fun dropWallPoints() {
+        val live = alive.indices.filter { alive[it] }
+        fun shift(k: Int) = hypot(cur[2 * k] - start[2 * k], cur[2 * k + 1] - start[2 * k + 1])
+        val moving = live.map(::shift).filter { it >= MOVING_PX }
+        if (moving.size < minPoints || moving.size < live.size * MOVING_FRACTION) return
+        // 움직이는 점들보다 한참 덜 움직인 점(벽, 등반자 가장자리에 살짝 끌린 벽 포함)
+        val still = maxOf(STILL_PX, median(moving) * STILL_RATIO)
+        val drop = live.filter { shift(it) < still }
+        if (live.size - drop.size < minPoints) return // 버리고 나면 너무 적으면 그대로(추적이 끊기지 않게)
+        for (k in drop) alive[k] = false
+    }
+
     private fun median(v: List<Double>): Double {
         val s = v.sorted()
         val m = s.size / 2
@@ -326,5 +344,9 @@ class FlowTracker(
         // OpenCV minEigThreshold(1e-4)는 Scharr 미분(÷32 안 함)·2^-20 스케일 기준 — 여기 단위(Scharr/32, 밝기 0..255)로 환산하면 1e-4 × 1024
         const val MIN_EIG = 1e-4 * 1024
         const val MIN_DIST = 4
+        private const val MOVING_PX = 2.0 // 시작 이후 이만큼 움직였으면 '움직이는 점'
+        private const val STILL_PX = 0.5 // 이보다 덜 움직였으면 벽(제자리)
+        private const val STILL_RATIO = 0.3 // 움직이는 점들의 이동량 중앙값 대비 이보다 덜 움직였으면 벽
+        private const val MOVING_FRACTION = 0.1 // 살아 있는 점 중 이 비율 이상이 움직여야 벽 점을 버린다
     }
 }

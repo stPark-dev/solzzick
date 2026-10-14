@@ -66,6 +66,32 @@ class FlowTrackerTest {
         assertEquals(18.0, d[1], 1.5)
     }
 
+    /**
+     * 사용자 영상(20260914_145634 8~11초): 등반자가 크게 움직이는데 몸 박스 안 점 대부분이 벽 위라 중앙값이 0 — 카메라가 멈춤.
+     * 고정 카메라에서 벽은 움직이지 않으니, 일부 점이 뚜렷이 움직이기 시작하면 제자리 점은 버리고 움직이는 쪽을 따라간다.
+     */
+    @Test
+    fun followsClimberEvenWhenMostSeedPointsAreOnTheWall() {
+        val t = FlowTracker()
+        assertTrue(t.seed(frame(100.0, 80.0), Box(55.0, 35.0, 205.0, 185.0))) // 패치(60x60)는 박스 면적의 약 16%
+        var d: DoubleArray? = null
+        for (k in 1..9) d = t.step(frame(100.0 + 4 * k, 80.0 + 2 * k))
+        assertNotNull(d)
+        // 패치 가장자리 점은 창 안의 벽 무늬에 끌려 덜 움직인다(실측 10~30px) — 안쪽 점은 정확(36px). 수정 전엔 8px(멈춤)
+        assertEquals(36.0, d!![0], 6.0)
+        assertEquals(18.0, d[1], 4.0)
+    }
+
+    @Test
+    fun stillClimberStaysStillWithWallPoints() {
+        val t = FlowTracker()
+        t.seed(frame(100.0, 80.0), Box(55.0, 35.0, 205.0, 185.0))
+        var d: DoubleArray? = null
+        for (k in 1..9) d = t.step(frame(100.0, 80.0))
+        assertEquals(0.0, d!![0], 0.2)
+        assertEquals(0.0, d[1], 0.2)
+    }
+
     @Test
     fun detectsSubpixelMotion() {
         val t = FlowTracker()

@@ -17,6 +17,14 @@ fun pickBox(boxes: List<Box>, x: Double, y: Double): Int? = boxes.withIndex().mi
     dx * dx + dy * dy
 }?.index
 
+/**
+ * 등반자 고르기 화면에 쓸 만한 프레임인지: 등반자 크기(높이 0.15 이상)의 사람 박스가 있는가.
+ * 멀리 있는 작은 사람·홀드 덩어리만 보이는 프레임을 건너뛰려고(점검: 20260821_155813, 20260607_151150).
+ */
+fun showsClimber(boxes: List<Box>): Boolean = boxes.any { it.height >= MIN_CLIMBER_HEIGHT }
+
+private const val MIN_CLIMBER_HEIGHT = 0.15
+
 class FusedTrack(val track: Array<DoubleArray>, val source: IntArray)
 
 /**
