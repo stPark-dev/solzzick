@@ -138,7 +138,8 @@ class Analyzer<F>(
         }
         val cands = pose.estimate(frame, ptsUs / 1000)
         val whole = choose(cands, index, frame)
-        val chosen = whole ?: aroundPersonBoxes(index, frame)
+        val search = searchNow(index)
+        val chosen = whole ?: if (search) aroundPersonBoxes(index, frame) else null
         // 색 특징은 한 번만 구해 유사도(기억 갱신 전 값)와 기억 갱신에 함께 쓴다
         val desc = chosen?.let { appearance?.describe(frame, torsoBox(it)) }
         val sim = desc?.let(::similarityToLook)
@@ -165,7 +166,7 @@ class Analyzer<F>(
             raw += NAN4
             if (tracker != null) stepFlow(index, frame) else startFlow(index, frame)
         }
-        val frameBoxes = if (chosen == null || (index / stride) % calibEverySamples == 0 || detectedAt == index) {
+        val frameBoxes = if ((chosen == null && search) || (index / stride) % calibEverySamples == 0 || detectedAt == index) {
             detected(frame, index)
         } else {
             emptyList()
@@ -253,6 +254,16 @@ class Analyzer<F>(
             source = fused.source,
             ptsUs = pts.toLongArray(),
         )
+    }
+
+    /**
+     * 포즈가 없을 때 사람 박스로 찾아볼 샘플인지. 포즈도 등반자 박스도 1초 넘게 못 찾는 동안(대개 등반 전후 빈 화면)은 0.3초마다만 —
+     * 사람 검출기(1회 약 90ms)가 분석 시간의 약 35%이고 그중 절반 가까이가 이런 호출이었다. 박스로 붙잡고 있는 동안(그네·쉬는 자세)은
+     * 매 샘플 그대로 찾고, 다시 잡는 포즈의 박스 확인은 그때 바로 한다.
+     */
+    private fun searchNow(index: Int): Boolean {
+        val longGone = lastIndex < 0 || index - lastIndex > LONG_MISS_S * fps
+        return !longGone || (index / stride) % LONG_MISS_EVERY == 0
     }
 
     /** 몸통이 화면 안인지 — 카메라 앞을 지나는 손·몸은 포즈 모델이 몸통을 화면 밖으로 추정한다(점검: 20260612_184742). */
@@ -455,6 +466,8 @@ class Analyzer<F>(
         private const val SIZE_RANGE_MIN = 0.4 // 잘라서 찾기·기준 갱신에 쓰는 사람 박스: 등반자 몸 높이의 이 배율 안
         private const val SIZE_RANGE_MAX = 2.5
         private const val SIZE_WINDOW_S = 3.0 // 등반자 크기 기준: 최근 이만큼의 포즈 키 중앙값
+        private const val LONG_MISS_S = 1.0 // 이만큼 포즈를 못 찾으면
+        private const val LONG_MISS_EVERY = 3 // 이 샘플마다만 사람 박스로 찾는다
         private const val SIZE_KEEP = 5 // 오래 놓친 뒤에도 크기 기준에 남기는 최근 포즈 수(상체만 잡힌 포즈 하나로 줄지 않게)
         private const val STATIC_KEEP_S = 2.5 // 판별에 쓰는 검출 기록 보관 기간
 

@@ -206,6 +206,72 @@ class OnDeviceBenchmark {
             .put("infer_ms_per_frame", inferMs / n).put("person_rate", withPerson.toDouble() / n)
     }
 
+    /** 실제 분석(ClimbPipeline.analyze와 같은 구성)의 단계별 시간 — 어디를 줄여야 빨라지는지 보려고. */
+    @Test
+    fun benchmarkAnalysisBreakdown() {
+        val results = JSONArray()
+        for (name in listOf("20261011_105654.mp4", "uhd60.mp4")) {
+            results.put(breakdown(name))
+            File(out, "breakdown.json").writeText(results.toString(2))
+            Log.i(TAG, results.getJSONObject(results.length() - 1).toString())
+        }
+    }
+
+    private class Timer {
+        val ns = mutableMapOf<String, Long>()
+        val calls = mutableMapOf<String, Int>()
+        inline fun <T> time(key: String, block: () -> T): T {
+            val t = SystemClock.elapsedRealtimeNanos()
+            try { return block() } finally {
+                ns[key] = (ns[key] ?: 0L) + (SystemClock.elapsedRealtimeNanos() - t)
+                calls[key] = (calls[key] ?: 0) + 1
+            }
+        }
+    }
+
+    private fun breakdown(name: String): JSONObject {
+        val tm = Timer()
+        val dec = FrameDecoder(video(name).path)
+        val stride = com.zzick.core.analysis.Analyzer.strideFor(dec.frameRate)
+        val t0 = SystemClock.elapsedRealtime()
+        var frames = 0
+        com.zzick.pipeline.MpPoseEstimator(ctx, numPoses = 1).use { mp ->
+            com.zzick.pipeline.MpPersonDetector(ctx).use { md ->
+                val pose = object : com.zzick.core.analysis.PoseEstimator<Bitmap> {
+                    override fun estimate(frame: Bitmap, timestampMs: Long) = tm.time("pose") { mp.estimate(frame, timestampMs) }
+                    override fun estimateCrop(frame: Bitmap, box: com.zzick.core.tracking.Box) = tm.time("pose_crop") { mp.estimateCrop(frame, box) }
+                }
+                val det = object : com.zzick.core.analysis.PersonDetector<Bitmap> {
+                    override fun detect(frame: Bitmap) = tm.time("detector") { md.detect(frame) }
+                }
+                val look = com.zzick.pipeline.BitmapAppearance()
+                val app = object : com.zzick.core.analysis.AppearanceExtractor<Bitmap> {
+                    override fun describe(frame: Bitmap, box: com.zzick.core.tracking.Box) = tm.time("appearance") { look.describe(frame, box) }
+                }
+                val g = com.zzick.pipeline.BitmapGray()
+                val gray = object : com.zzick.core.analysis.GrayProvider<Bitmap> {
+                    override fun gray(frame: Bitmap) = tm.time("gray") { g.gray(frame) }
+                }
+                val a = com.zzick.core.analysis.Analyzer(
+                    pose, det, dec.srcWidth.toDouble(), dec.srcHeight.toDouble(), dec.frameRate, stride,
+                    appearance = app, gray = gray, confirmStart = true,
+                )
+                frames = dec.decode(wantPixels = { i -> tm.time("needs_pixels") { a.needsPixels(i) } }) { i, pts, bmp ->
+                    tm.time("on_frame") { a.onFrame(i, pts, bmp) }
+                }
+                a.finish(dec.frameRate)
+            }
+        }
+        val total = SystemClock.elapsedRealtime() - t0
+        val o = JSONObject().put("video", name).put("size", "${dec.srcWidth}x${dec.srcHeight}").put("fps", dec.frameRate)
+            .put("stride", stride).put("frames", frames).put("total_ms", total)
+            .put("duration_s", frames / dec.frameRate)
+        for ((k, v) in tm.ns) o.put("${k}_ms", v / 1_000_000).put("${k}_calls", tm.calls[k])
+        val onFrame = (tm.ns["on_frame"] ?: 0L) / 1_000_000
+        o.put("decode_and_other_ms", total - onFrame)
+        return o
+    }
+
     companion object {
         private const val TAG = "zzick-bench"
     }

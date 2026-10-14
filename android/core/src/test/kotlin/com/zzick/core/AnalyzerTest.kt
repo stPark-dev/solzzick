@@ -651,4 +651,19 @@ class AnalyzerTest {
         assertTrue("상체만 잡힌 등반자는 받음", 171 in chosen)
         for ((i, c) in chosen) assertTrue("frame $i 작은 사람을 받음 x=${c[0] / w}", c[0] < 0.7 * w)
     }
+
+    /**
+     * 분석 속도: 사람 검출기(1회 약 90ms)가 분석 시간의 약 35% — 그중 42%가 포즈를 1초 넘게 못 찾는 동안(등반 전후 빈 화면)의 호출.
+     * 오래 못 찾는 동안은 0.3초마다만 찾는다(다시 잡는 포즈 확인은 필요할 때 바로 검출).
+     */
+    @Test
+    fun detectorRunsLessOftenWhileClimberIsLongGone() {
+        val pose = FakePose { i -> if (i < 30) listOf(person(0.5f, 0.5f)) else emptyList() }
+        val det = FakeDetector()
+        Analyzer(pose, det, w, h, fps, stride = 3)
+            .apply { for (i in 0 until 300) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        val late = det.calls.count { it >= 60 } // 80샘플
+        assertTrue("검출 $late 번", late <= 40)
+    }
 }
