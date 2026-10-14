@@ -31,7 +31,7 @@ def test_clean_climb_has_no_flags():
     track = [[400 + i * 2.0, 900 - i * 1.5] for i in range(n)]
     box = lambda i: [[track[i][0] - 100, track[i][1] - 200, track[i][0] + 100, track[i][1] + 200]]
     r = at.analyze(video(track, [at.POSE] * n, box))
-    assert r["seconds"] == {"MISMATCH": 0, "FROZEN": 0, "JUMP": 0}
+    assert r["seconds"] == {"MISMATCH": 0, "FROZEN": 0, "JUMP": 0, "SMALL": 0}
     assert not r["weak"]
 
 
@@ -132,3 +132,42 @@ def test_following_small_seated_person_while_climber_box_elsewhere_is_mismatch()
     d["body"] = [[x - 120, y - 240, x + 120, y + 240] if i < 150 else [x - 20, y - 30, x + 20, y + 30]
                  for i, (x, y) in enumerate(track)]
     assert at.analyze(d)["seconds"]["MISMATCH"] > 4
+
+
+def test_one_stray_box_does_not_extend_mismatch_over_samples_without_boxes():
+    """점검에서 찾음(20260927_122338~2 7.5~13.4s): 등반자를 잘 따라가는데, 한 샘플에 등반자만 한 뒤쪽 사람 박스가 잡히고
+    그 뒤 박스 없는 샘플들이 그 판정을 6초 동안 이어 감. 판정은 짧게(0.6초)만 이어 간다."""
+    n = 450
+    track = [[300.0, 700.0]] * n
+    box = lambda i: [[1200, 900, 1300, 1150]] if i == 225 else []  # 7.5s에 한 번
+    r = at.analyze(video(track, [at.POSE] * n, box))
+    assert r["seconds"]["MISMATCH"] == 0
+
+
+def test_following_small_far_person_while_big_climber_is_seen_is_small():
+    """점검에서 찾음(20260821_155813 v6): 영상 내내 멀리 있는 작은 사람(몸 0.09H)을 따라가는 동안 사람 검출기는
+    훨씬 큰 등반자를 계속 봄 — MISMATCH는 몸 크기 중앙값이 작은 사람 것이라 큰 등반자 박스를 빼 버려 못 잡았다."""
+    n = 300
+    track = [[1200.0, 1100.0]] * n
+    box = lambda i: [[600, 200, 1000, 850]] if 60 <= i < 210 else []  # 2~7초: 등반자(키 650)
+    r = at.analyze(video(track, [at.POSE] * n, box, body_h=130.0))
+    assert r["segments"]["SMALL"] == [[2.0, 7.5]]  # 마지막 박스(6.9s) 뒤 0.6초 이어 감
+
+
+def test_background_people_smaller_than_climber_are_not_small():
+    n = 300
+    track = [[600.0, 700.0]] * n
+    box = lambda i: [[550, 500, 650, 900], [1200, 1000, 1260, 1150]]
+    r = at.analyze(video(track, [at.POSE] * n, box))
+    assert r["seconds"]["SMALL"] == 0
+
+
+def test_climber_partly_out_of_frame_inside_own_big_box_is_not_small():
+    """점검에서 찾음(20260817_101757 20.8~23s): 등반자가 화면 위로 반쯤 나가 몸 높이가 작게 잡혀도, 추적 위치가 그 큰 박스
+    안이면 같은 사람이다 — 다른 곳의 큰 사람만 SMALL."""
+    n = 300
+    track = [[600.0, 200.0]] * n
+    box = lambda i: [[450, 0, 800, 600]]
+    r = at.analyze(video(track, [at.POSE] * n, box, body_h=130.0))
+    assert r["seconds"]["SMALL"] == 0
+
