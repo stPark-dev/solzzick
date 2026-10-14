@@ -28,7 +28,7 @@ class CameraParams:
     drift_x: float = 0.03  # 느린 프레이밍 드리프트 RMS
     drift_y: float = 0.02
     drift_hz: float = 0.1
-    drift_calm_speed: float = 0.25  # 몸통 속도(프레임 높이/초)가 이 이상이면 드리프트를 뺀다(빠른 이동은 가운데에). 0이면 끔
+    drift_calm_speed: float = 0.25  # 몸통 속도(프레임 높이/초)가 빠를수록 드리프트를 줄여 이 속도 이상이면 뺀다(절반 속도면 절반). 0이면 끔
     shake_gain: float = 1.0  # 0이면 짐벌 느낌
     shake_x: float = 0.0007  # 손떨림 RMS (gain 1 기준)
     shake_y: float = 0.0003
@@ -136,7 +136,7 @@ def _drift_scale(track, fps, src_h, p):
     sm = np.stack([uniform_filter1d(track[:, i] / src_h, k, mode="nearest") for i in range(2)], axis=1)
     speed = np.linalg.norm(np.gradient(sm, axis=0), axis=1) * fps
     scale = np.clip(1 - speed / p.drift_calm_speed, 0.0, 1.0)
-    scale = minimum_filter1d(scale, 2 * max(1, int(round(p.lead_s * fps))) + 1, mode="nearest")
+    scale = minimum_filter1d(scale, 2 * int(round(p.lead_s * fps)) + 1, mode="nearest")
     return uniform_filter1d(scale, max(1, int(round(fps))), mode="nearest")
 
 

@@ -28,7 +28,7 @@ data class CameraParams(
     val driftX: Double = 0.03, // 느린 프레이밍 드리프트 RMS
     val driftY: Double = 0.02,
     val driftHz: Double = 0.1,
-    val driftCalmSpeed: Double = 0.25, // 몸통 속도(프레임 높이/초)가 이 이상이면 드리프트를 뺀다(빠른 이동은 가운데에). 0이면 끔
+    val driftCalmSpeed: Double = 0.25, // 몸통 속도(프레임 높이/초)가 빠를수록 드리프트를 줄여 이 속도 이상이면 뺀다(절반 속도면 절반). 0이면 끔
     val shakeGain: Double = 1.0, // 0이면 짐벌 느낌
     val shakeX: Double = 0.0007, // 손떨림 RMS (gain 1 기준)
     val shakeY: Double = 0.0003,
@@ -194,7 +194,7 @@ object VirtualCamera {
         val gx = gradient(uniform(DoubleArray(n) { track[it][0] / srcH }, k))
         val gy = gradient(uniform(DoubleArray(n) { track[it][1] / srcH }, k))
         val scale = DoubleArray(n) { (1 - hypot(gx[it], gy[it]) * fps / p.driftCalmSpeed).coerceIn(0.0, 1.0) }
-        val early = slide(scale, 2 * max(1, Math.rint(p.leadS * fps).toInt()) + 1, ::min)
+        val early = slide(scale, 2 * Math.rint(p.leadS * fps).toInt() + 1, ::min)
         return uniform(early, max(1, Math.rint(fps).toInt()))
     }
 

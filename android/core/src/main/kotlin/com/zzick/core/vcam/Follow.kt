@@ -40,8 +40,8 @@ object Follow {
         val xd = delayed(target, fps, delayS)
         val steps = max(substeps, ceil(omega / fps / 0.25).toInt()) // ω·dt ≤ 0.25 로 적분 안정성 확보
         val dt = 1.0 / fps / steps
-        var g = target[0]
-        var y = target[0]
+        var g = xd[0] // 앞당긴(음수 지연) 목표에서 출발 — target[0]에서 출발하면 시작에 출렁인다
+        var y = xd[0]
         var v = 0.0
         val out = DoubleArray(xd.size)
         out[0] = y

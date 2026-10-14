@@ -16,16 +16,19 @@ from tools.render import visible_extent
 from tracking.fuse import body_boxes, fuse_track
 from vcam.camera import CameraParams, solve_path
 
+PRE_LEAD = {"lead_s": 0.0, "drift_calm_speed": 0.0}  # 미리 겨누기·드리프트 줄이기 전(0.4.0까지)의 카메라
+
 CAMERA_CASES = {
-    "default": {},
-    "shake5_seed3": {"shake_gain": 5.0, "seed": 3},
-    "zoom15_nodrift": {"zoom": 1.5, "drift_x": 0.0, "drift_y": 0.0},
-    "wide169": {"aspect": 16 / 9, "out_height": 1080},
-    "portrait45_shake3": {"aspect": 4 / 5, "out_height": 1350, "shake_gain": 3.0},
-    "no_motion_zoom": {"motion_zoom": False},
-    "fps60_style_even_windows": {"crux_window_s": 2.0, "speed_smooth_s": 0.2, "move_hold_s": 0.4},
-    "lead_calm": {},  # 0.4.x: 미리 겨누기 + 빠른 이동 중 드리프트 줄이기(기본값)
+    "default": PRE_LEAD,
+    "shake5_seed3": {**PRE_LEAD, "shake_gain": 5.0, "seed": 3},
+    "zoom15_nodrift": {**PRE_LEAD, "zoom": 1.5, "drift_x": 0.0, "drift_y": 0.0},
+    "wide169": {**PRE_LEAD, "aspect": 16 / 9, "out_height": 1080},
+    "portrait45_shake3": {**PRE_LEAD, "aspect": 4 / 5, "out_height": 1350, "shake_gain": 3.0},
+    "no_motion_zoom": {**PRE_LEAD, "motion_zoom": False},
+    "fps60_style_even_windows": {**PRE_LEAD, "crux_window_s": 2.0, "speed_smooth_s": 0.2, "move_hold_s": 0.4},
+    "lead_calm": {},  # 미리 겨누기 + 빠른 이동 중 드리프트 줄이기(현재 기본값)
     "lead_calm_strict": {"lead_s": 0.5, "drift_calm_speed": 0.1, "seed": 2},
+    "calm_no_lead": {"lead_s": 0.0},
 }
 
 
@@ -67,7 +70,7 @@ def export(npz_path, video=None):
     for name, overrides in CAMERA_CASES.items():
         p = replace(CameraParams(), **overrides)
         cases[name] = {"params": asdict(p), "path": solve_path(track * h, fps, w, h, p, body=body * h).tolist()}
-    p = CameraParams()
+    p = replace(CameraParams(), **PRE_LEAD)
     cases["default_no_body"] = {"params": asdict(p), "path": solve_path(track * h, fps, w, h, p).tolist()}
     return {
         "fps": fps,

@@ -144,9 +144,10 @@ class VirtualCameraTest {
         for (i in 100 until 165) assertTrue("frame $i off=${path[i][0] - track[i][0]}", abs(path[i][0] - track[i][0]) <= dz + 5)
     }
 
-    private val handheld = CameraParams(shakeGain = 0.0, motionZoom = false) // 느린 프레이밍 드리프트는 켠 상태
+    private val handheld = CameraParams(shakeGain = 0.0, motionZoom = false, seed = 4) // 드리프트는 켠 상태(이동 구간에서 드리프트가 큰 시드)
 
-    private fun fastTraverse(): Array<DoubleArray> = traverse(speed = -360.0, x0 = 1150.0).also { t -> t.forEach { it[0] = maxOf(it[0], 400.0) } } // 원본 가장자리에 막히지 않게
+    private fun fastTraverse(): Array<DoubleArray> =
+        traverse(speed = -450.0, x0 = 1250.0).also { t -> t.forEach { it[0] = maxOf(it[0], 400.0) } } // 원본 가장자리에 막히지 않게
 
     /** 사용자 제보(20260801_161145): 손으로 찍은 느낌의 느린 드리프트(±3%) 때문에 빠르게 옮겨 갈 때도 가운데에서 벗어난다. */
     @Test
@@ -154,17 +155,46 @@ class VirtualCameraTest {
         val track = fastTraverse()
         val plain = VirtualCamera.solvePath(track, fps, w, h, handheld.copy(driftCalmSpeed = 0.0))
         val nodrift = VirtualCamera.solvePath(track, fps, w, h, handheld.copy(driftX = 0.0, driftY = 0.0))
-        assertTrue((75 until 105).maxOf { abs(plain[it][0] - nodrift[it][0]) } > 10)
+        assertTrue((75 until 100).minOf { abs(plain[it][0] - nodrift[it][0]) } > 20)
     }
 
-    /** 빠른 이동 중엔 드리프트를 빼 가운데를 지키고, 서 있을 땐 손으로 찍은 느낌을 그대로 둔다. */
+    /** 빠른 이동 중(기준 속도 이상)엔 드리프트를 빼 가운데를 지키고, 서 있을 땐 손으로 찍은 느낌을 그대로 둔다. */
     @Test
     fun driftFadesDuringFastMoveAndStaysWhenStill() {
         val track = fastTraverse()
         val calm = VirtualCamera.solvePath(track, fps, w, h, handheld)
         val nodrift = VirtualCamera.solvePath(track, fps, w, h, handheld.copy(driftX = 0.0, driftY = 0.0))
-        for (i in 75 until 105) for (c in 0..1) assertEquals("frame $i", nodrift[i][c], calm[i][c], 1.0)
+        for (i in 75 until 100) for (c in 0..1) assertEquals("frame $i", nodrift[i][c], calm[i][c], 1.0)
         val plain = VirtualCamera.solvePath(track, fps, w, h, handheld.copy(driftCalmSpeed = 0.0))
         for (i in 0 until 20) assertArrayEquals(plain[i], calm[i], 1e-9)
+    }
+
+    /** 기준의 절반 속도면 드리프트도 절반쯤 남는다(서서히 줄어든다). */
+    @Test
+    fun driftIsPartlyKeptAtModerateSpeed() {
+        val track = traverse() // 180px/s = 0.125 H/s, 기준(0.25)의 절반
+        val calm = VirtualCamera.solvePath(track, fps, w, h, handheld)
+        val plain = VirtualCamera.solvePath(track, fps, w, h, handheld.copy(driftCalmSpeed = 0.0))
+        val nodrift = VirtualCamera.solvePath(track, fps, w, h, handheld.copy(driftX = 0.0, driftY = 0.0))
+        for (i in 100 until 150) {
+            val kept = (calm[i][0] - nodrift[i][0]) / (plain[i][0] - nodrift[i][0])
+            assertEquals("frame $i", 0.5, kept, 0.05)
+        }
+    }
+
+    /** 미리 겨누기(음수 지연): 앞의 목표를 보고, 끝을 넘으면 마지막 값으로 유지. */
+    @Test
+    fun negativeDelayLooksAheadAndHoldsLastValue() {
+        val x = DoubleArray(10) { it.toDouble() }
+        assertArrayEquals(doubleArrayOf(2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 9.0, 9.0), com.zzick.core.vcam.Follow.delayed(x, fps, -2 / fps), 1e-9)
+    }
+
+    /** 처음부터 움직이는 목표를 앞당겨 따라갈 때, 시작에서 목표와 어긋난 채 출발해 출렁이지 않는다. */
+    @Test
+    fun followWithLookAheadHasNoStartWobble() {
+        val target = DoubleArray(60) { 100 + 10.0 * it }
+        val y = com.zzick.core.vcam.Follow.simulate(target, fps, omega = 8.0, zeta = 0.9, delayS = -0.2)
+        val lag = DoubleArray(60) { target[it] + 10.0 * 0.2 * fps - y[it] }
+        for (i in 1 until 20) assertTrue("frame $i", lag[i] - lag[i - 1] >= -1e-9)
     }
 }
