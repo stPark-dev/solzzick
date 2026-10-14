@@ -493,10 +493,162 @@ class AnalyzerTest {
             if (i < 60) listOf(person(0.99f, 0.86f)) // 탭과 먼 작은 사람만 잡힘
             else listOf(person(0.60f, 0.70f), person(0.99f, 0.86f))
         }
-        val r = Analyzer(pose, FakeDetector(), w, h, fps, stride = 3, tap = 0.59 to 0.76, confirmStart = true)
+        val det = FakeDetector { i ->
+            listOf(Box(0.97, 0.80, 1.01, 0.92)) + if (i >= 60) listOf(Box(0.5, 0.56, 0.7, 0.84)) else emptyList()
+        }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, tap = 0.59 to 0.76, confirmStart = true)
             .apply { for (i in 0 until 120) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
             .finish(fps)
         for (i in 0 until 120) assertTrue("frame $i x=${r.track[i][0] / w}", r.track[i][0] < 0.8 * w)
         for (i in 60 until 120 step 3) assertEquals("frame $i src", Fuse.POSE, r.source[i])
+    }
+
+    /**
+     * 점검에서 찾음(20260607_151150 v5): 등반자가 들어오기 전, 탭 자리 벽의 홀드를 포즈 모델이 사람으로 냄 —
+     * 탭 근처라 첫 포즈가 되고 그 색을 익혀, 들어온 등반자를 영상 내내 놓침.
+     * 탭 모드의 첫 포즈도 사람 검출기 박스 안이어야 한다.
+     */
+    @Test
+    fun firstPoseNearTheTapMustAlsoBeAPersonTheDetectorSees() {
+        val pose = FakePose { i ->
+            if (i < 60) listOf(person(0.59f, 0.74f)) // 탭 자리 홀드를 사람으로(등반자 입장 전)
+            else listOf(person(0.62f, 0.70f))
+        }
+        val det = FakeDetector { i -> if (i >= 60) listOf(Box(0.52, 0.56, 0.72, 0.84)) else emptyList() }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, tap = 0.59 to 0.76, confirmStart = true)
+            .apply { for (i in 0 until 120) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 0 until 60 step 3) assertTrue("frame $i 홀드를 첫 포즈로 받음", r.source[i] != Fuse.POSE)
+        for (i in 60 until 120 step 3) assertEquals("frame $i src", Fuse.POSE, r.source[i])
+    }
+
+    /**
+     * 점검에서 찾음(20261011_105654): 등반자가 오른쪽으로 나간 뒤 4초쯤, 포즈 모델이 벽의 홀드를 사람으로 드문드문 냄 —
+     * 색이 비슷하고(0.7대) 오래 비어 속도 제한도 넉넉해 채택됨 → 카메라가 빈 벽으로 끌려가고 자동 트리밍 끝이 늘어남.
+     * 오래(2초 이상) 놓친 뒤 다시 잡는 포즈도 첫 포즈처럼 사람 검출기 박스 안이어야 한다.
+     */
+    @Test
+    fun poseAfterLongGapMustBeAPersonTheDetectorSees() {
+        val pose = FakePose { i ->
+            when {
+                i < 100 -> listOf(person(0.5f, 0.5f))
+                i in 220 until 240 -> listOf(person(0.3f, 0.5f)) // 빈 벽의 홀드
+                else -> emptyList()
+            }
+        }
+        val det = FakeDetector { i -> if (i < 100) listOf(Box(0.4, 0.36, 0.6, 0.64)) else emptyList() }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
+            .apply { for (i in 0 until 270) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 0 until 100 step 3) assertEquals("frame $i src", Fuse.POSE, r.source[i])
+        for (i in 222 until 240 step 3) assertTrue("frame $i 빈 벽 포즈를 받음", r.source[i] != Fuse.POSE)
+    }
+
+    /** 잠깐 놓쳤다 다시 잡을 때 검출기가 없더라도(1초) 그대로 받는다 — 위 규칙은 오래 놓친 뒤에만. */
+    @Test
+    fun poseAfterShortGapIsAcceptedWithoutDetector() {
+        val pose = FakePose { i -> if (i in 60 until 90) emptyList() else listOf(person(0.5f, 0.5f)) }
+        val det = FakeDetector { i -> if (i < 30) listOf(Box(0.4, 0.36, 0.6, 0.64)) else emptyList() }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
+            .apply { for (i in 0 until 150) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 90 until 150 step 3) assertEquals("frame $i src", Fuse.POSE, r.source[i])
+    }
+
+    /**
+     * 점검에서 찾음(20260821_155813 v7 23.8s): 등반자를 놓친 사이 멀리 있는 작은 사람 박스 주변을 잘라 포즈를 찾았는데,
+     * 몸통 칸이 너무 작아 색을 못 구함(null) → 비교 없이 받아 그 사람을 끝까지 따라감.
+     * 색을 익힌 뒤 잘라서 찾은 포즈는 색이 맞는다고 확인될 때만 받는다.
+     */
+    @Test
+    fun cropPoseWhoseLookCannotBeMeasuredIsRejected() {
+        val pose = FakePose(crop = { _, b -> if (b.cx > 0.6) listOf(person(0.64f, 0.78f)) else emptyList() }) { i ->
+            if (i < 60) listOf(person(0.5f, 0.5f)) else emptyList()
+        }
+        val look = object : com.zzick.core.analysis.AppearanceExtractor<Int> {
+            override fun describe(frame: Int, box: Box): FloatArray? = if (box.cx > 0.6) null else floatArrayOf(1f, 0f)
+        }
+        val det = FakeDetector { i ->
+            listOf(Box(0.62, 0.72, 0.66, 0.83)) + if (i < 60) listOf(Box(0.4, 0.36, 0.6, 0.64)) else emptyList()
+        }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, appearance = look, confirmStart = true)
+            .apply { for (i in 0 until 120) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 60 until 120 step 3) assertTrue("frame $i 작은 사람을 받음", r.source[i] != Fuse.POSE)
+    }
+
+    /**
+     * 점검에서 찾음(20260821_155813 v7 23.1~24.0s): 상체만 잡힌 포즈(키 0.16)가 한 번 들어오자 크기 기준이 그 값으로 줄어,
+     * 멀리 있는 작은 사람 박스(0.09)도 '등반자 크기'로 통과 → 그 주변을 잘라 찾은 포즈를 받고 끝까지 따라감.
+     * 크기 기준은 최근 몇 초 포즈 키의 중앙값이어야 한다.
+     */
+    @Test
+    fun onePartialPoseDoesNotShrinkTheClimberSize() {
+        fun tall(x: Float, y: Float) = person(x, y).let { p ->
+            PoseCandidate(p.x, FloatArray(33) { i -> if (i == 0) y - 0.2f else if (i in 27..32) y + 0.2f else p.y[i] }, p.visibility)
+        }
+        fun short(x: Float, y: Float) = person(x, y).let { p ->
+            PoseCandidate(p.x, FloatArray(33) { i -> if (i == 0) y - 0.08f else if (i in 27..32) y + 0.08f else p.y[i] }, p.visibility)
+        }
+        val pose = FakePose(crop = { i, b ->
+            when {
+                b.cx > 0.75 -> listOf(person(0.84f, 0.78f)) // 멀리 있는 작은 사람
+                i == 63 -> listOf(short(0.5f, 0.4f)) // 상체만 잡힌 등반자
+                else -> emptyList()
+            }
+        }) { i -> if (i < 60) listOf(tall(0.5f, 0.45f)) else emptyList() }
+        val det = FakeDetector { i ->
+            val j = if (i % 2 == 0) 0.01 else -0.01 // 실제 검출처럼 가장자리가 흔들림(움직이지 않는 박스로 빠지지 않게)
+            listOf(Box(0.35 + j, 0.2, 0.65, 0.75 - j), Box(0.82 + j, 0.73, 0.86, 0.82 + j))
+        }
+        val chosen = mutableMapOf<Int, DoubleArray>()
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true, onSample = { s -> s.chosen?.let { chosen[s.index] = it } })
+            .apply { for (i in 0 until 120) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        assertTrue("상체만 잡힌 등반자는 받음", 63 in chosen)
+        for ((i, c) in chosen) assertTrue("frame $i 작은 사람을 받음 x=${c[0] / w}", c[0] < 0.7 * w)
+        for (i in 0 until 120) assertTrue("frame $i 작은 사람으로 감 x=${r.track[i][0] / w}", r.track[i][0] < 0.7 * w)
+    }
+
+    /**
+     * 리뷰에서 찾음: 가만히 쉬는 등반자를 2초 넘게 놓치면, 그 사이 박스가 '움직이지 않는 박스'로 빠지고 다시 잡을 때는
+     * 사람 박스 확인이 필요해 영영 못 잡았다. 다시 잡을 때의 확인은 움직임 필터 전 박스(등반자 크기)로 한다.
+     */
+    @Test
+    fun stillClimberIsReacquiredAfterLongGap() {
+        val pose = FakePose { i -> if (i in 60 until 150) emptyList() else listOf(person(0.5f, 0.5f)) }
+        val det = FakeDetector { _ -> listOf(Box(0.4, 0.36, 0.6, 0.64)) }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
+            .apply { for (i in 0 until 200) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 150 until 200 step 3) assertEquals("frame $i src", Fuse.POSE, r.source[i])
+    }
+
+    /** 리뷰에서 찾음: 3초 넘게 놓친 뒤 처음 잡은 포즈가 상체뿐이면 크기 기준이 그 하나로 줄던 문제 — 최근 몇 개는 남긴다. */
+    @Test
+    fun partialPoseAfterLongGapDoesNotShrinkTheClimberSize() {
+        fun tall(x: Float, y: Float) = person(x, y).let { p ->
+            PoseCandidate(p.x, FloatArray(33) { i -> if (i == 0) y - 0.2f else if (i in 27..32) y + 0.2f else p.y[i] }, p.visibility)
+        }
+        fun short(x: Float, y: Float) = person(x, y).let { p ->
+            PoseCandidate(p.x, FloatArray(33) { i -> if (i == 0) y - 0.08f else if (i in 27..32) y + 0.08f else p.y[i] }, p.visibility)
+        }
+        val pose = FakePose(crop = { i, b ->
+            when {
+                b.cx > 0.75 -> listOf(person(0.84f, 0.78f)) // 멀리 있는 작은 사람
+                i == 171 -> listOf(short(0.5f, 0.4f)) // 오래 놓친 뒤 상체만 잡힌 등반자
+                else -> emptyList()
+            }
+        }) { i -> if (i < 60) listOf(tall(0.5f, 0.45f)) else emptyList() }
+        val det = FakeDetector { i ->
+            val j = if (i % 2 == 0) 0.01 else -0.01
+            listOf(Box(0.35 + j, 0.2, 0.65, 0.75 - j), Box(0.82 + j, 0.73, 0.86, 0.82 + j))
+        }
+        val chosen = mutableMapOf<Int, DoubleArray>()
+        Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true, onSample = { s -> s.chosen?.let { chosen[s.index] = it } })
+            .apply { for (i in 0 until 230) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        assertTrue("상체만 잡힌 등반자는 받음", 171 in chosen)
+        for ((i, c) in chosen) assertTrue("frame $i 작은 사람을 받음 x=${c[0] / w}", c[0] < 0.7 * w)
     }
 }

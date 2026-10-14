@@ -92,7 +92,7 @@ class Analyzer<F>(
     private val gray: GrayProvider<F>? = null,
     private val maxFlowS: Double = 3.0, // 이보다 긴 공백은 다음 포즈와 이어질 가능성이 낮아 흐름을 멈춘다(비용 절약)
     private val onSample: ((SampleReport) -> Unit)? = null, // 진단 기록(점검·문제 신고)
-    private val confirmStart: Boolean = false, // 첫 포즈 확인(한 명 모드: 사람 박스 안, 탭 모드: 탭 근처) — 앱은 켬
+    private val confirmStart: Boolean = false, // 첫 포즈·오래 놓친 뒤 포즈 확인(사람 박스 안, 탭 모드 첫 포즈는 탭 근처도) — 앱은 켬
 ) {
     private val aspect = srcW / srcH
     private var last: DoubleArray? = tap?.let { doubleArrayOf(it.first * aspect, it.second) }
@@ -118,7 +118,9 @@ class Analyzer<F>(
     private var gapTried = -1 // 이 포즈 프레임에서 시작하는 공백은 이미 흐름을 시도함
     private var detectedAt = -1 // 아래 detectedBoxes를 구한 프레임(한 프레임에 검출기는 한 번만)
     private var detectedBoxes: List<Box> = emptyList()
+    private var detectedRaw: List<Box> = emptyList() // 같은 프레임의 움직임 필터 전 박스
     private val detections = ArrayDeque<Pair<Int, List<Box>>>() // 최근 검출(움직이지 않는 박스 판별용)
+    private val poseHeights = ArrayDeque<Pair<Int, Double>>() // 최근 채택한 포즈의 키(등반자 크기 기준)
 
     /** 이 프레임의 픽셀이 필요한지 — 포즈 추정 프레임이거나 흐름으로 따라가는 중일 때만(나머지는 GPU 읽기 생략). */
     fun needsPixels(index: Int) = index % stride == 0 || tracker != null
@@ -156,6 +158,8 @@ class Analyzer<F>(
             lastPoseGray = gray?.gray(frame)
             lastPoseTorso = t
             lastPoseExtent = raw.last()
+            raw.last().let { e -> if (!e[1].isNaN()) poseHeights.addLast(index to e[3] - e[1]) }
+            while (poseHeights.size > SIZE_KEEP && poseHeights.first().first < index - SIZE_WINDOW_S * fps) poseHeights.removeFirst()
         } else {
             torso += NAN2
             raw += NAN4
@@ -256,14 +260,18 @@ class Analyzer<F>(
 
     /**
      * 첫 포즈 확인(confirmStart): 등반자가 들어오기 전 포즈 모델이 홀드·작은 사람을 내면 비교할 기준이 없어 그대로 첫 포즈가
-     * 되던 문제(점검: 20260914_153037, 20260612_184742, 20260607_151150). 탭 모드는 탭 근처, 한 명 모드는 사람 박스 안.
+     * 되던 문제(점검: 20260914_153037, 20260612_184742, 20260607_151150). 첫 포즈는 사람 박스 안이어야 하고, 탭 모드는 탭 근처이기도 해야 한다.
+     * 오래 놓친 뒤 다시 잡는 포즈도 사람 박스 안이어야 한다 — 등반자가 나간 뒤 빈 벽의 홀드를 받아 카메라가 끌려가던 문제(점검: 20261011_105654).
      */
     private fun startOk(p: PoseCandidate, index: Int, frame: F): Boolean {
-        if (!confirmStart || lastPoseIndex >= 0) return true
+        val first = lastPoseIndex < 0
+        if (!confirmStart || (!first && index - lastPoseIndex < REACQUIRE_S * fps)) return true
         val t = torsoOf(p)
         val tp = tapPoint
-        if (tp != null) return hypot(t[0] - tp[0], t[1] - tp[1]) <= START_RADIUS
-        return detected(frame, index).any { t[0] in it.x0..it.x1 && t[1] in it.y0..it.y1 }
+        if (first && tp != null && hypot(t[0] - tp[0], t[1] - tp[1]) > START_RADIUS) return false
+        // 다시 잡을 때는 움직임 필터 전 박스(등반자 크기) — 가만히 쉬던 등반자의 박스가 '움직이지 않는 박스'로 빠져도 잡게
+        val boxes = if (first) detected(frame, index) else detected(frame, index).let { detectedRaw.filter(::climberSized) }
+        return boxes.any { t[0] in it.x0..it.x1 && t[1] in it.y0..it.y1 }
     }
 
     private fun choose(all: List<PoseCandidate>, index: Int, frame: F): PoseCandidate? {
@@ -289,13 +297,14 @@ class Analyzer<F>(
     }
 
     /**
-     * 등반자 몸 크기에 맞는 사람 박스인지(최근 포즈의 관절 범위 높이 대비). 모르면 모두 맞다고 본다.
+     * 등반자 몸 크기에 맞는 사람 박스인지(최근 포즈 키 대비). 모르면 모두 맞다고 본다.
      * 매트에 앉은 작은 사람·카메라 앞을 지나는 큰 사람을 등반자로 착각하지 않게(점검: 20260821_155813).
+     * 기준은 최근 몇 초 포즈 키의 중앙값 — 마지막 포즈 하나로 재면 상체만 잡힌 포즈 뒤에 기준이 줄어 작은 사람도 통과했다.
      */
     private fun climberSized(b: Box): Boolean {
-        val ext = lastPoseExtent ?: return true
-        val bodyH = ext[3] - ext[1]
-        if (bodyH.isNaN() || bodyH <= 0) return true
+        if (poseHeights.isEmpty()) return true
+        val bodyH = poseHeights.map { it.second }.sorted()[poseHeights.size / 2]
+        if (bodyH <= 0) return true
         return (b.y1 - b.y0) / bodyH in SIZE_RANGE_MIN..SIZE_RANGE_MAX
     }
 
@@ -310,7 +319,7 @@ class Analyzer<F>(
             .take(MAX_CROPS)
             .firstNotNullOfOrNull { b ->
                 pose.estimateCrop(frame, Box(b.x0 / aspect, b.y0, b.x1 / aspect, b.y1))
-                    .firstOrNull { c -> inFrame(c) && startOk(c, index, frame) && lookSimilarity(frame, c)?.let { it >= minSimilarity } ?: true }
+                    .firstOrNull { c -> inFrame(c) && startOk(c, index, frame) && cropLooksRight(frame, c) }
             }
     }
 
@@ -334,6 +343,7 @@ class Analyzer<F>(
             val climber = lastPoseTorso?.takeIf { lastPoseTrusted && lastPoseIndex >= 0 && index - lastPoseIndex <= STATIC_S * fps }
             fun holdsClimber(b: Box) = climber != null && climber[0] in b.x0..b.x1 && climber[1] in b.y0..b.y1
             detectedBoxes = raw.filter { b -> holdsClimber(b) || !motionless(b) }
+            detectedRaw = raw
             detections.addLast(index to raw)
             while (detections.isNotEmpty() && index - detections.first().first > STATIC_KEEP_S * fps) detections.removeFirst()
             detectedAt = index
@@ -349,6 +359,16 @@ class Analyzer<F>(
         val inX = (xs.max() - xs.min()) * 0.2
         val inY = (ys.max() - ys.min()) * 0.2
         return Box(xs.min() + inX, ys.min() + inY, xs.max() - inX, ys.max() - inY)
+    }
+
+    /**
+     * 잘라서 찾은 포즈의 색 확인. 색을 익혔으면 색을 구할 수 있고 맞아야 한다 — 몸통 칸이 너무 작아 색을 못 구한 작은 사람을
+     * 비교 없이 받아 끝까지 따라가던 문제(점검: 20260821_155813). 익히기 전이면 통과.
+     */
+    private fun cropLooksRight(frame: F, p: PoseCandidate): Boolean {
+        if (appearance == null || look == null || lookSamples < MIN_LOOK_SAMPLES) return true
+        val sim = lookSimilarity(frame, p) ?: return false
+        return sim >= minSimilarity
     }
 
     /** 익힌 등반자 색과의 유사도. 아직 못 익혔거나 특징을 못 구하면 null(확인 생략). */
@@ -427,12 +447,15 @@ class Analyzer<F>(
         private const val RELEARN_SAMPLES = 10 // 샘플 10회(초당 약 10회 추정이면 약 1초)
         private const val RELEARN_MOVE = 0.05 // 그동안 몸통이 이만큼(높이 비율) 움직였어야 다시 익힌다
         private const val START_RADIUS = 0.2 // 탭 모드 첫 포즈: 탭에서 이 거리(높이 비율) 안
+        private const val REACQUIRE_S = 2.0 // 이만큼 포즈를 놓친 뒤 다시 잡을 때도 사람 박스 확인
         private const val STATIC_S = 2.0 // 이만큼 전 박스와 거의 같은 자리면 움직이지 않는 박스(사람 아님)
         private const val STATIC_TOL = 0.006 // 네 변 모두 이 안(높이 비율, 1440px에서 약 9px)이면 '그대로'
         private const val STATIC_SHARE = 0.8 // 최근 검출의 이 비율 이상에서 그대로면 움직이지 않는 박스
         private const val STATIC_MIN_DETECTIONS = 5
         private const val SIZE_RANGE_MIN = 0.4 // 잘라서 찾기·기준 갱신에 쓰는 사람 박스: 등반자 몸 높이의 이 배율 안
         private const val SIZE_RANGE_MAX = 2.5
+        private const val SIZE_WINDOW_S = 3.0 // 등반자 크기 기준: 최근 이만큼의 포즈 키 중앙값
+        private const val SIZE_KEEP = 5 // 오래 놓친 뒤에도 크기 기준에 남기는 최근 포즈 수(상체만 잡힌 포즈 하나로 줄지 않게)
         private const val STATIC_KEEP_S = 2.5 // 판별에 쓰는 검출 기록 보관 기간
 
         /** 히스토그램 교집합(둘 다 합 1일 때 0..1). */

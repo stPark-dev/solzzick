@@ -29,6 +29,7 @@ import com.zzick.core.overlay.CaptureDate
 import com.zzick.core.overlay.OverlayInfo
 import com.zzick.core.quality.SourceInfo
 import com.zzick.core.tracking.Box
+import com.zzick.core.tracking.showsClimber
 import com.zzick.core.trim.Trim
 import com.zzick.core.trim.TrimWindow
 import com.zzick.core.vcam.CameraParams
@@ -47,8 +48,11 @@ import kotlin.math.roundToInt
 
 private fun Box.clamped() = Box(x0.coerceIn(0.0, 1.0), y0.coerceIn(0.0, 1.0), x1.coerceIn(0.0, 1.0), y1.coerceIn(0.0, 1.0))
 
-/** 등반자 선택 화면용: 사람이 처음 보이는 프레임과 사람 박스(프레임 폭/높이 기준 0..1). */
+/** 등반자 선택 화면용: 등반자 크기의 사람이 처음 보이는 프레임과 사람 박스(프레임 폭/높이 기준 0..1). */
 class PeoplePreview(val frameIndex: Int, val bitmap: Bitmap, val boxes: List<Box>)
+
+/** 고르기 화면: 사람이 처음 보인 뒤 등반자 크기의 사람을 이만큼(초)까지 더 찾는다. */
+private const val PREVIEW_SEARCH_S = 30.0
 
 /** 분석 결과 + 렌더에 필요한 원본 정보. 파라미터만 바꿔 다시 렌더할 때 재사용한다. */
 class Analysis(
@@ -103,22 +107,39 @@ class ClimbPipeline(private val context: Context) {
     }
 
     /**
-     * 0.5초 간격으로 훑어 사람이 처음 보이는 프레임을 찾는다. 끝까지 없으면 null. 호출 스레드에서 실행.
+     * 0.5초 간격으로 훑어 등반자 크기의 사람이 처음 보이는 프레임을 찾는다(멀리 있는 작은 사람만 보이는 프레임은 건너뜀).
+     * 사람이 처음 보인 뒤 30초 안에 없으면 그 처음 프레임, 사람이 아예 없으면 null. 호출 스레드에서 실행.
      * @throws CancellationException isCancelled가 true가 되면 즉시 멈춘다.
      */
     fun findPeople(uri: Uri, isCancelled: () -> Boolean = { false }): PeoplePreview? {
         val dec = decoder(uri)
         val step = maxOf(1, (dec.frameRate / 2).roundToInt())
+        val giveUp = (PREVIEW_SEARCH_S * dec.frameRate).roundToInt()
+        var first: PeoplePreview? = null
         var found: PeoplePreview? = null
+        var lastIndex = 0
+        fun done() = found != null || first?.let { lastIndex - it.frameIndex > giveUp } == true
         MpPersonDetector(context).use { det ->
-            dec.decode(wantPixels = { it % step == 0 }, stop = { found != null || isCancelled() }) { i, _, bmp ->
+            dec.decode(wantPixels = { it % step == 0 }, stop = { done() || isCancelled() }) { i, _, bmp ->
+                lastIndex = i
                 if (i % step != 0) return@decode
                 val boxes = det.detect(bmp).map { it.clamped() }
-                if (boxes.isNotEmpty()) found = PeoplePreview(i, bmp.copy(bmp.config!!, false), boxes)
+                if (boxes.isEmpty()) return@decode
+                val climber = showsClimber(boxes)
+                if (first == null || climber) {
+                    val preview = PeoplePreview(i, bmp.copy(bmp.config!!, false), boxes)
+                    if (first == null) first = preview
+                    if (climber) found = preview
+                }
             }
         }
-        if (isCancelled()) throw CancellationException("사용자 취소")
-        return found
+        if (isCancelled()) {
+            first?.bitmap?.recycle()
+            found?.bitmap?.takeIf { found !== first }?.recycle()
+            throw CancellationException("사용자 취소")
+        }
+        if (found != null && found !== first) first?.bitmap?.recycle()
+        return found ?: first
     }
 
     /**
