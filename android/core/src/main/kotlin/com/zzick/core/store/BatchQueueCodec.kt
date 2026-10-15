@@ -1,6 +1,7 @@
 package com.zzick.core.store
 
 import com.zzick.core.batch.BatchItem
+import com.zzick.core.batch.BatchJob
 import com.zzick.core.batch.BatchQueue
 import com.zzick.core.batch.Stage
 import com.zzick.core.overlay.Grade
@@ -17,15 +18,26 @@ import java.io.OutputStream
 /** 일괄 편집 목록을 기기에 저장하는 이진 형식. 분석 결과는 넣지 않는다(분석 저장본에서 다시 붙인다 — BatchQueue.restored). */
 object BatchQueueCodec {
     private const val MAGIC = 0x534A5A42 // "SJZB"
-    /** 2: 설정에 영상 구석 표시(OverlayInfo) 추가. 1도 읽는다(표시 없음). */
-    private const val VERSION = 2
+    /**
+     * 2: 설정에 영상 구석 표시(OverlayInfo) 추가. 1도 읽는다(표시 없음).
+     * 3: 작업(BatchJob) — 공통 설정이 작업마다. 1·2는 목록 전체를 "이전 작업" 하나로 읽는다.
+     */
+    private const val VERSION = 3
+    const val PREVIOUS_JOB_NAME = "이전 작업"
 
     fun write(q: BatchQueue<*>, out: OutputStream) {
         val d = DataOutputStream(out.buffered())
         d.writeInt(MAGIC)
         d.writeInt(VERSION)
         d.writeInt(q.nextId)
-        d.writeSettings(q.common)
+        d.writeInt(q.nextJobId)
+        d.writeInt(q.jobs.size)
+        for (j in q.jobs) {
+            d.writeInt(j.id)
+            d.writeLong(j.createdAtMs)
+            d.writeOptional(j.name) { n -> writeUTF(n) }
+            d.writeSettings(j.common)
+        }
         d.writeInt(q.items.size)
         for (it in q.items) {
             d.writeInt(it.id)
@@ -37,6 +49,7 @@ object BatchQueueCodec {
             d.writeOptional(it.settings) { s -> writeSettings(s) }
             d.writeOptional(it.output) { o -> writeUTF(o) }
             d.writeOptional(it.error) { e -> writeUTF(e) }
+            d.writeInt(it.jobId)
         }
         d.flush()
     }
@@ -47,7 +60,12 @@ object BatchQueueCodec {
         val version = if (d.readInt() == MAGIC) d.readInt() else -1
         if (version !in 1..VERSION) null else {
             val nextId = d.readInt()
-            val common = d.readSettings(version)
+            val nextJobId = if (version >= 3) d.readInt() else 2
+            val jobs = if (version >= 3) {
+                List(d.readInt()) { BatchJob(d.readInt(), d.readLong(), d.readOptional { readUTF() }, d.readSettings(version)) }
+            } else {
+                listOf(BatchJob(1, 0L, PREVIOUS_JOB_NAME, d.readSettings(version)))
+            }
             val items = List(d.readInt()) {
                 BatchItem<A>(
                     id = d.readInt(),
@@ -59,9 +77,12 @@ object BatchQueueCodec {
                     settings = d.readOptional { readSettings(version) },
                     output = d.readOptional { readUTF() },
                     error = d.readOptional { readUTF() },
+                    jobId = if (version >= 3) d.readInt() else 1,
                 )
             }
-            BatchQueue(items, common, nextId)
+            // 작업 없는 영상(깨진 저장본)은 빼고, 영상 없는 작업도 뺀다
+            val kept = items.filter { i -> jobs.any { it.id == i.jobId } }
+            BatchQueue(kept, jobs.filter { j -> kept.any { it.jobId == j.id } }, nextId, nextJobId)
         }
     } catch (e: IOException) {
         null

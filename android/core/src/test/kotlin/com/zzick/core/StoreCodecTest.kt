@@ -83,11 +83,13 @@ class StoreCodecTest {
     }
 
     private fun sampleQueue(): BatchQueue<String> {
-        var q = BatchQueue<String>().add(listOf("content://a", "content://b", "content://c", "content://d", "content://e", "content://f"))
-            .withCommon(EditSettings(zoom = 1.2, shake = 2.0, aspect = AspectRatio.R4x5, motionZoom = false))
+        var q = BatchQueue<String>().add(listOf("content://a", "content://b", "content://c", "content://d", "content://e", "content://f"), createdAtMs = 1_791_000_000_000L)
+            .let { it.withCommon(it.jobs[0].id, EditSettings(zoom = 1.2, shake = 2.0, aspect = AspectRatio.R4x5, motionZoom = false)) }
+            .let { it.rename(it.jobs[0].id, "강남") }
+            .add(listOf("content://h"), createdAtMs = 1_791_000_600_000L) // 두 번째 작업(분석 전)
         // renderAll은 준비된 항목을 모두 넘기므로, 준비됨으로 남길 1번은 마지막에 분석
-        q = q.onStarted(6).onScanned(6, 1).onStarted(6).onAnalyzed(6, "A6", TrimWindow(0, 1)).renderAll().onStarted(6).onRendered(6, "content://out/6")
-        q = q.onStarted(2).onScanned(2, 1).onStarted(2).onAnalyzed(2, "A2", TrimWindow(0, 500)).renderAll().onStarted(2) // 렌더 중
+        q = q.onStarted(6).onScanned(6, 1).onStarted(6).onAnalyzed(6, "A6", TrimWindow(0, 1)).renderAll(1).onStarted(6).onRendered(6, "content://out/6")
+        q = q.onStarted(2).onScanned(2, 1).onStarted(2).onAnalyzed(2, "A2", TrimWindow(0, 500)).renderAll(1).onStarted(2) // 렌더 중
         q = q.onStarted(3).onScanned(3, 3) // 선택 대기
         q = q.onStarted(4).onScanned(4, 1).onStarted(4).onProgress(4, 0.4f) // 분석 중
         q = q.onFailed(5, "등반자를 찾지 못했어요")
@@ -105,10 +107,12 @@ class StoreCodecTest {
     fun queueRoundTripKeepsEverythingButAnalysis() {
         val q = sampleQueue()
         val back = q.roundTrip()!!
-        assertEquals(q.common, back.common)
+        assertEquals(q.jobs, back.jobs)
         assertEquals(q.items.map { it.copy(analysis = null) }, back.items)
-        // 다음 항목 번호도 이어져야 한다
-        assertEquals(7, back.add(listOf("content://g")).items.last().id)
+        // 다음 항목·작업 번호도 이어져야 한다
+        val more = back.add(listOf("content://g"), createdAtMs = 1_791_001_000_000L)
+        assertEquals(8, more.items.last().id)
+        assertEquals(3, more.jobs.last().id)
         assertNull(BatchQueueCodec.read<String>(ByteArrayInputStream(ByteArray(3))))
     }
 
@@ -140,5 +144,43 @@ class StoreCodecTest {
         val b = r.item(2)
         assertEquals(Stage.WAITING_RENDER, b.stage)
         assertEquals("A2", b.analysis)
+    }
+
+    /** 작업 개념 전(버전 2) 저장본: 목록 전체를 "이전 작업" 하나로 읽고 공통 설정을 그 작업에 둔다. */
+    @Test
+    fun queueSavedBeforeJobsIsReadAsOnePreviousJob() {
+        val bytes = ByteArrayOutputStream().also { o ->
+            java.io.DataOutputStream(o).apply {
+                writeInt(0x534A5A42); writeInt(2) // 매직, 버전 2
+                writeInt(3) // 다음 항목 번호
+                writeDouble(1.2); writeDouble(2.0); writeUTF("R4x5"); writeBoolean(false) // 공통 설정
+                writeUTF("강남"); writeBoolean(true); writeBoolean(false) // 영상 구석 표시
+                writeInt(2)
+                for ((id, src) in listOf(1 to "content://a", 2 to "content://b")) {
+                    writeInt(id); writeUTF(src); writeUTF("DONE"); writeFloat(1f)
+                    writeBoolean(false); writeBoolean(false); writeBoolean(false) // 탭·구간·개별 설정 없음
+                    writeBoolean(true); writeUTF("content://out/$id"); writeBoolean(false) // 결과, 오류 없음
+                }
+                flush()
+            }
+        }.toByteArray()
+        val q = BatchQueueCodec.read<String>(ByteArrayInputStream(bytes))!!
+        assertEquals(1, q.jobs.size)
+        assertEquals("이전 작업", q.jobs[0].name)
+        assertEquals(EditSettings(zoom = 1.2, shake = 2.0, aspect = AspectRatio.R4x5, motionZoom = false, overlay = com.zzick.core.overlay.OverlayInfo("강남", true, null)), q.jobs[0].common)
+        assertEquals(listOf("content://a", "content://b"), q.itemsOf(q.jobs[0].id).map { it.source })
+        val more = q.add(listOf("content://c"), createdAtMs = 1L)
+        assertEquals(3, more.items.last().id)
+        assertEquals(2, more.jobs.last().id)
+    }
+
+    /** 리뷰에서 찾음: 깨진 저장본에서 작업이 없는 영상은 빼고 읽는다(작업을 못 찾아 설정 조회가 죽지 않게). */
+    @Test
+    fun videosWithoutTheirJobAreDropped() {
+        val q = BatchQueue<String>().add(listOf("content://a"), createdAtMs = 1L).add(listOf("content://b"), createdAtMs = 2L)
+        val broken = q.copy(jobs = q.jobs.take(1)) // 두 번째 작업 정보가 없음
+        val back = ByteArrayOutputStream().also { BatchQueueCodec.write(broken, it) }.toByteArray()
+            .let { BatchQueueCodec.read<String>(ByteArrayInputStream(it))!! }
+        assertEquals(listOf("content://a"), back.items.map { it.source })
     }
 }

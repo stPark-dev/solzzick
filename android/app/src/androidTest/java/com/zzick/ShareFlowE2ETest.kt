@@ -16,6 +16,7 @@ import com.zzick.ui.MainActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -67,9 +68,11 @@ class ShareFlowE2ETest {
     fun sharingSeveralVideosOpensBatch() {
         share(Intent(Intent.ACTION_SEND_MULTIPLE).setType("video/*")
             .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(shared))).use {
-            compose.waitUntilAtLeastOneExists(hasText("일괄 편집"), 30_000)
-            val sources = BatchProcessor.get(ctx).state.value.items.map { Uri.parse(it.source) }
-            assertTrue("일괄 편집 목록에 들어가야 함: $sources", sources.containsAll(shared))
+            // 공유한 영상들이 새 작업 하나로 들어가고 그 작업 화면이 바로 열린다
+            compose.waitUntilAtLeastOneExists(hasText("작업 목록"), 30_000)
+            val q = BatchProcessor.get(ctx).state.value
+            val sources = q.itemsOf(q.jobs.last().id).map { Uri.parse(it.source) }
+            assertEquals("새 작업에 공유한 영상만 들어가야 함", shared.toSet(), sources.toSet())
         }
     }
 }

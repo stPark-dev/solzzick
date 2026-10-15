@@ -77,7 +77,7 @@ class BatchQueueTest {
         val (a, c, d) = b.items.map { it.id }
         b = b.onScanned(a, 1).onStarted(a).onAnalyzed(a, "A", w)
         b = b.onScanned(c, 2) // 선택 필요
-        b = b.renderAll()
+        b = b.renderAll(b.jobs[0].id)
         assertEquals(Stage.WAITING_RENDER, b.item(a).stage)
         assertEquals(Stage.NEEDS_SELECTION, b.item(c).stage)
         assertEquals(Stage.QUEUED, b.item(d).stage)
@@ -94,11 +94,11 @@ class BatchQueueTest {
     fun itemSettingsOverrideCommonSettings() {
         var b = q("a", "b")
         val (a, c) = b.items.map { it.id }
-        b = b.withCommon(EditSettings(zoom = 1.1))
+        b = b.withCommon(b.jobs[0].id, EditSettings(zoom = 1.1))
         b = b.withItemSettings(a, EditSettings(aspect = AspectRatio.R16x9))
         assertEquals(EditSettings(aspect = AspectRatio.R16x9), b.settingsFor(a))
         assertEquals(EditSettings(zoom = 1.1), b.settingsFor(c))
-        b = b.withCommon(EditSettings(shake = 3.0)) // 공통 변경은 개별 설정을 덮지 않는다
+        b = b.withCommon(b.jobs[0].id, EditSettings(shake = 3.0)) // 공통 변경은 개별 설정을 덮지 않는다
         assertEquals(EditSettings(aspect = AspectRatio.R16x9), b.settingsFor(a))
     }
 

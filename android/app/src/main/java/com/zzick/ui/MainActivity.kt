@@ -87,20 +87,21 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize().brandBackground(), color = Color.Transparent) { Box(Modifier.safeDrawingPadding()) { SplashGate {
                     val processor = remember { BatchProcessor.get(applicationContext) }
                     var batch by rememberSaveable { mutableStateOf(false) }
+                    var batchJob by rememberSaveable { mutableStateOf<Int?>(null) } // 열어 둔 작업(null이면 작업 목록)
                     val editor: EditorViewModel = viewModel()
                     LaunchedEffect(shared) {
                         when (shared.size) {
                             0 -> return@LaunchedEffect
                             1 -> { batch = false; editor.onVideoPicked(shared[0]) }
-                            else -> { processor.add(shared); batch = true }
+                            else -> processor.add(shared)?.let { batchJob = it; batch = true }
                         }
                         shared = emptyList()
                     }
                     if (batch) {
-                        BackHandler { batch = false }
-                        BatchScreen(processor) { batch = false }
+                        BackHandler { if (batchJob != null) batchJob = null else batch = false }
+                        BatchScreen(processor, batchJob, onOpenJob = { batchJob = it }) { batch = false }
                     } else {
-                        EditorScreen(editor, processor) { batch = true }
+                        EditorScreen(editor, processor) { job -> batchJob = job; batch = true }
                     }
                 } } }
             }
@@ -116,24 +117,24 @@ class MainActivity : ComponentActivity() {
 
 @UnstableApi
 @Composable
-private fun EditorScreen(vm: EditorViewModel, processor: BatchProcessor, openBatch: () -> Unit) {
+private fun EditorScreen(vm: EditorViewModel, processor: BatchProcessor, openBatch: (job: Int?) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val batchQueue by processor.state.collectAsStateWithLifecycle()
-    var pending by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    // 알림 권한 대화상자 동안 화면이 다시 만들어져도 고른 영상을 잃지 않게(잃으면 빈 작업이 생겼다)
+    var pending by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
     // 알림 권한(13+)은 진행 상황 표시용 — 거절해도 처리는 계속된다
     val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        processor.add(pending)
+        val job = processor.add(pending.map(Uri::parse))
         pending = emptyList()
-        openBatch()
+        job?.let(openBatch)
     }
     val multiPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_BATCH)) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         if (Build.VERSION.SDK_INT >= 33) {
-            pending = uris
+            pending = uris.map(Uri::toString)
             notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            processor.add(uris)
-            openBatch()
+            processor.add(uris)?.let(openBatch)
         }
     }
     val activity = LocalContext.current as MainActivity
@@ -181,7 +182,7 @@ private fun EditorScreen(vm: EditorViewModel, processor: BatchProcessor, openBat
                     Text("여러 영상 일괄 편집")
                 }
                 if (batchQueue.items.isNotEmpty()) {
-                    TextButton(onClick = openBatch) { Text("일괄 편집 이어서 보기 (${batchQueue.items.size}개)", color = Brand.HoldBlue) }
+                    TextButton(onClick = { openBatch(null) }) { Text("일괄 편집 작업 보기 (작업 ${batchQueue.jobs.size}개)", color = Brand.HoldBlue) }
                 }
             }
             EditorState.Scanning -> {

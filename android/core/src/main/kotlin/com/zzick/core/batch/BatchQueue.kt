@@ -17,6 +17,12 @@ sealed interface Work {
     data class Render(val id: Int) : Work
 }
 
+/**
+ * 일괄 편집 작업: 영상을 골라 넣을 때마다 하나. 목록을 작업별로 묶어 보고, 공통 설정·모두 만들기는 작업 단위.
+ * @param name 사용자가 붙인 이름(없으면 화면에 만든 날짜·시간)
+ */
+data class BatchJob(val id: Int, val createdAtMs: Long, val name: String?, val common: EditSettings)
+
 /** @param A 분석 결과 타입(앱의 Analysis). core는 내용을 모른다. */
 data class BatchItem<A>(
     val id: Int,
@@ -29,23 +35,33 @@ data class BatchItem<A>(
     val settings: EditSettings? = null, // null이면 공통 설정
     val output: String? = null,
     val error: String? = null,
+    val jobId: Int = 0,
 )
 
 /**
  * 일괄 편집 큐(불변). 모든 연산은 새 큐를 돌려준다.
- * 작업 순서: 분석 단계 일(사람 찾기·분석)을 목록 순서대로 먼저 — 사용자가 결과 목록을 빨리 보도록 — 그다음 렌더.
+ * 작업 순서: 분석 단계 일(사람 찾기·분석)을 목록 순서대로(먼저 만든 작업부터) 먼저 — 사용자가 결과 목록을 빨리 보도록 — 그다음 렌더.
  */
 data class BatchQueue<A>(
     val items: List<BatchItem<A>> = emptyList(),
-    val common: EditSettings = EditSettings(),
+    val jobs: List<BatchJob> = emptyList(),
     internal val nextId: Int = 1, // 저장·복원(BatchQueueCodec)용으로 모듈 안에 공개
+    internal val nextJobId: Int = 1,
 ) {
     fun item(id: Int) = items.first { it.id == id }
 
-    fun add(sources: List<String>) = copy(
-        items = items + sources.mapIndexed { i, s -> BatchItem<A>(nextId + i, s, Stage.QUEUED) },
-        nextId = nextId + sources.size,
-    )
+    fun job(jobId: Int) = jobs.first { it.id == jobId }
+
+    fun itemsOf(jobId: Int) = items.filter { it.jobId == jobId }
+
+    /** 새 작업 하나로 넣는다(영상이 없으면 그대로). 공통 설정은 common을 주지 않으면 마지막 작업 것 그대로. */
+    fun add(sources: List<String>, createdAtMs: Long = 0L, common: EditSettings = jobs.lastOrNull()?.common ?: EditSettings()) =
+        if (sources.isEmpty()) this else copy(
+            items = items + sources.mapIndexed { i, s -> BatchItem<A>(nextId + i, s, Stage.QUEUED, jobId = nextJobId) },
+            jobs = jobs + BatchJob(nextJobId, createdAtMs, null, common),
+            nextId = nextId + sources.size,
+            nextJobId = nextJobId + 1,
+        )
 
     fun nextWork(): Work? {
         items.firstOrNull { it.stage == Stage.QUEUED || it.stage == Stage.WAITING_ANALYSIS }?.let {
@@ -79,7 +95,8 @@ data class BatchQueue<A>(
     fun onAnalyzed(id: Int, analysis: A, window: TrimWindow) =
         update(id) { it.copy(stage = Stage.READY, analysis = analysis, window = window, progress = 1f) }
 
-    fun renderAll() = copy(items = items.map { if (it.stage == Stage.READY) it.copy(stage = Stage.WAITING_RENDER) else it })
+    fun renderAll(jobId: Int) =
+        copy(items = items.map { if (it.jobId == jobId && it.stage == Stage.READY) it.copy(stage = Stage.WAITING_RENDER) else it })
 
     fun onRendered(id: Int, output: String) = update(id) { it.copy(stage = Stage.DONE, output = output, progress = 1f) }
 
@@ -91,18 +108,28 @@ data class BatchQueue<A>(
     }
 
     fun retry(id: Int) = update(id) {
-        if (it.stage == Stage.FAILED) BatchItem(it.id, it.source, Stage.QUEUED, settings = it.settings) else it
+        if (it.stage == Stage.FAILED) BatchItem(it.id, it.source, Stage.QUEUED, settings = it.settings, jobId = it.jobId) else it
     }
 
-    fun remove(id: Int) = copy(items = items.filter { it.id != id })
+    /** 영상 하나를 뺀다. 그 작업에 영상이 남지 않으면 작업도 없앤다. */
+    fun remove(id: Int): BatchQueue<A> {
+        val rest = items.filter { it.id != id }
+        return copy(items = rest, jobs = jobs.filter { j -> rest.any { it.jobId == j.id } })
+    }
 
-    fun withCommon(settings: EditSettings) = copy(common = settings)
+    /** 작업과 그 영상들을 목록에서 뺀다(만든 결과 영상은 갤러리에 남는다). */
+    fun removeJob(jobId: Int) = copy(items = items.filter { it.jobId != jobId }, jobs = jobs.filter { it.id != jobId })
+
+    /** 앞뒤 공백을 지운 이름(40자까지). 비면 이름 없음(날짜·시간으로 보인다). */
+    fun rename(jobId: Int, name: String) = updateJob(jobId) { it.copy(name = name.trim().take(MAX_NAME).ifEmpty { null }) }
+
+    fun withCommon(jobId: Int, settings: EditSettings) = updateJob(jobId) { it.copy(common = settings) }
 
     fun withItemSettings(id: Int, settings: EditSettings) = update(id) { it.copy(settings = settings) }
 
     fun withWindow(id: Int, window: TrimWindow) = update(id) { it.copy(window = window) }
 
-    fun settingsFor(id: Int): EditSettings = item(id).settings ?: common
+    fun settingsFor(id: Int): EditSettings = item(id).let { it.settings ?: job(it.jobId).common }
 
     /**
      * 앱을 다시 켰을 때 저장본에서 복원한 큐를 이어서 처리할 수 있게 정리한다.
@@ -129,7 +156,10 @@ data class BatchQueue<A>(
 
     private fun update(id: Int, f: (BatchItem<A>) -> BatchItem<A>) = copy(items = items.map { if (it.id == id) f(it) else it })
 
+    private fun updateJob(jobId: Int, f: (BatchJob) -> BatchJob) = copy(jobs = jobs.map { if (it.id == jobId) f(it) else it })
+
     private companion object {
+        const val MAX_NAME = 40
         val CANCELLABLE = setOf(Stage.QUEUED, Stage.SCANNING, Stage.WAITING_ANALYSIS, Stage.ANALYZING, Stage.WAITING_RENDER, Stage.RENDERING)
     }
 }

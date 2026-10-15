@@ -52,11 +52,11 @@ class OverlayTest {
     @Test
     fun overlaySurvivesBatchListSaveAndRestore() {
         val o = OverlayInfo(gym = "더클라임 강남", showDate = true, grade = Grade.PURPLE)
-        val q = BatchQueue<String>().add(listOf("content://a")).withCommon(EditSettings(overlay = o))
+        val q = BatchQueue<String>().add(listOf("content://a")).let { it.withCommon(it.jobs[0].id, EditSettings(overlay = o)) }
             .withItemSettings(1, EditSettings(aspect = AspectRatio.R4x5, overlay = o.copy(grade = Grade.WHITE)))
         val bytes = ByteArrayOutputStream().also { BatchQueueCodec.write(q, it) }.toByteArray()
         val back = BatchQueueCodec.read<String>(ByteArrayInputStream(bytes))!!
-        assertEquals(q.common, back.common)
+        assertEquals(q.jobs, back.jobs)
         assertEquals(q.items, back.items)
     }
 
@@ -74,8 +74,8 @@ class OverlayTest {
             }
         }.toByteArray()
         val q = BatchQueueCodec.read<String>(ByteArrayInputStream(bytes))!!
-        assertEquals(EditSettings(zoom = 1.2, shake = 2.0, aspect = AspectRatio.R4x5, motionZoom = false), q.common)
-        assertEquals(OverlayInfo(), q.common.overlay)
+        assertEquals(EditSettings(zoom = 1.2, shake = 2.0, aspect = AspectRatio.R4x5, motionZoom = false), q.jobs[0].common)
+        assertEquals(OverlayInfo(), q.jobs[0].common.overlay)
         assertEquals(listOf("content://a"), q.items.map { it.source })
     }
 
