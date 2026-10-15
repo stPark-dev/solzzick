@@ -43,13 +43,13 @@ class BatchProcessorTest {
     @Test
     fun analyzesAllThenRendersAllToGallery() = runBlocking<Unit> {
         val p = newProcessor()
-        withContext(Dispatchers.Main) { p.add(listOf(video("20260927_113733.mp4"), video("20261011_105654.mp4"))) }
+        val job = withContext(Dispatchers.Main) { p.add(listOf(video("20260927_113733.mp4"), video("20261011_105654.mp4"))) }!!
         assertTrue("처리 중 서비스가 떠 있어야 함", withTimeout(10_000) { while (!BatchService.running) kotlinx.coroutines.delay(50); true })
         val ready = p.awaitState(240_000) { q -> q.items.all { it.stage == Stage.READY || it.stage == Stage.FAILED } }
         assertEquals(listOf(Stage.READY, Stage.READY), ready.items.map { it.stage })
         ready.items.forEach { assertNotNull(it.window); assertNotNull(it.analysis) }
 
-        withContext(Dispatchers.Main) { p.renderAll() }
+        withContext(Dispatchers.Main) { p.renderAll(job) }
         val done = p.awaitState(240_000) { q -> q.items.all { it.stage == Stage.DONE || it.stage == Stage.FAILED } }
         assertEquals(listOf(Stage.DONE, Stage.DONE), done.items.map { it.stage })
         for (item in done.items) {
@@ -92,19 +92,45 @@ class BatchProcessorTest {
     @Test
     fun listSurvivesRestart() = runBlocking<Unit> {
         val p1 = newProcessor()
-        withContext(Dispatchers.Main) { p1.add(listOf(video("20260927_113733.mp4"))) }
+        val job = withContext(Dispatchers.Main) { p1.add(listOf(video("20260927_113733.mp4"))) }!!
         val ready = p1.awaitState(240_000) { q -> q.items.all { it.stage == Stage.READY || it.stage == Stage.FAILED } }
         val id = ready.items[0].id
         val window = TrimWindow(ready.items[0].window!!.startUs + 500_000, ready.items[0].window!!.endUs - 500_000)
-        withContext(Dispatchers.Main) { p1.setWindow(id, window) }
+        withContext(Dispatchers.Main) { p1.setWindow(id, window); p1.rename(job, "강남") }
         withTimeout(5_000) { while (!stateFile.exists() || stateFile.lastModified() == 0L) kotlinx.coroutines.delay(50) }
         kotlinx.coroutines.delay(500) // 마지막 변경이 저장될 때까지
 
         val p2 = newProcessor() // 같은 저장 파일로 새로 띄움 = 앱을 다시 켬(복원은 백그라운드)
-        val item = p2.awaitState(5_000) { it.items.isNotEmpty() }.items.single()
+        // 목록은 바로 보이고, 분석 결과는 백그라운드에서 다시 붙는다
+        assertTrue("목록은 바로 보여야 함", p2.state.value.items.isNotEmpty())
+        val restored = p2.awaitState(5_000) { q -> q.items.isNotEmpty() && q.items.all { it.analysis != null } }
+        assertEquals("강남", restored.jobs.single().name) // 작업(이름)도 남는다
+        val item = restored.items.single()
         assertEquals(Stage.READY, item.stage)
         assertNotNull("분석 결과가 다시 붙어야 함", item.analysis)
         assertEquals(window, item.window)
+    }
+
+    /**
+     * 리뷰에서 찾음: 앱을 켜자마자(저장된 목록을 복원하는 중에) 공유로 영상을 넣으면, 돌려받은 작업 번호가 복원 뒤 번호를
+     * 다시 매기면서 엉뚱한 작업을 가리키고, 진행 중인 처리 결과가 저장돼 있던 다른 영상에 기록됐다.
+     */
+    @Test
+    fun videosAddedWhileRestoringStayInTheReturnedJob() = runBlocking<Unit> {
+        val saved = BatchQueue<Analysis>().add(listOf("content://saved/a"), createdAtMs = 1L)
+            .let { q -> q.copy(items = q.items.map { it.copy(stage = Stage.DONE, output = "content://out/a") }) }
+            .let { it.rename(it.jobs[0].id, "저장된 작업") }
+        stateFile.outputStream().use { com.zzick.core.store.BatchQueueCodec.write(saved, it) }
+
+        val p = newProcessor()
+        val job = withContext(Dispatchers.Main) { p.add(listOf(video("20260927_113733.mp4"))) }!!
+        val q = p.awaitState(240_000) { q -> q.items.size == 2 && q.items.none { it.stage in setOf(Stage.QUEUED, Stage.SCANNING, Stage.WAITING_ANALYSIS, Stage.ANALYZING) } }
+        assertEquals(listOf(video("20260927_113733.mp4").toString()), q.itemsOf(job).map { it.source })
+        assertEquals(Stage.READY, q.itemsOf(job).single().stage)
+        val old = q.jobs.single { it.id != job }
+        assertEquals("저장된 작업", old.name)
+        assertEquals(Stage.DONE, q.itemsOf(old.id).single().stage) // 새 영상 처리 결과가 덮어쓰지 않는다
+        assertEquals("content://out/a", q.itemsOf(old.id).single().output)
     }
 
     /** 이미 분석한 영상은 일괄 편집에 넣어도 다시 분석하지 않는다. */
