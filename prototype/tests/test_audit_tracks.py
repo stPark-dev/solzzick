@@ -90,13 +90,15 @@ def test_excluded_videos_are_listed_but_not_counted(tmp_path):
 
 
 def test_videos_outside_climbing_hours_are_skipped():
-    # 등반 영상 시간대(기본 09~16시) — 파일명 시각으로 거른다
+    # 등반 영상 시간대(기본 09~18시, 사용자가 알려 줌) — 파일명 시각으로 거른다
     assert at.in_hours("20260914_145634.mp4")
     assert at.in_hours("20260914_090000.mp4")
+    assert at.in_hours("20260801_161145.mp4")  # 16시대도 등반
+    assert at.in_hours("20260914_175959.mp4")
     assert not at.in_hours("20260409_001725.mp4")
     assert not at.in_hours("20260905_080224.mp4")
     assert not at.in_hours("20260904_224100.mp4")
-    assert not at.in_hours("20260914_160000.mp4")
+    assert not at.in_hours("20260914_180000.mp4")
     assert at.in_hours("SNOW_123.mp4")  # 시각을 모르면 남긴다
 
 

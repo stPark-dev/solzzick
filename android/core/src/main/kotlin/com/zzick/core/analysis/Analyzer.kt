@@ -107,6 +107,7 @@ class Analyzer<F>(
     private val torso = ArrayList<DoubleArray>()
     private val raw = ArrayList<DoubleArray>()
     private val boxes = ArrayList<List<Box>>()
+    private val anchors = ArrayList<Box?>() // 포즈가 없을 때 이어 따라간 등반자 박스(프레임별)
     private val pts = ArrayList<Long>()
     private val flowPos = ArrayList<DoubleArray>()
     private val flowSeed = ArrayList<Int>()
@@ -133,6 +134,7 @@ class Analyzer<F>(
             torso += NAN2
             raw += NAN4
             boxes.add(emptyList())
+            anchors.add(null)
             stepFlow(index, frame)
             return
         }
@@ -172,7 +174,7 @@ class Analyzer<F>(
             emptyList()
         }
         boxes.add(frameBoxes)
-        if (chosen == null) anchorToBox(frameBoxes, index)
+        anchors.add(if (chosen == null) anchorToBox(frameBoxes, index) else null)
         onSample?.invoke(
             SampleReport(
                 index, cands.size, chosen?.let { torsoOf(it).map { v -> v * srcH }.toDoubleArray() }, sim, whole == null && chosen != null,
@@ -186,14 +188,16 @@ class Analyzer<F>(
      * 그래야 포즈가 다시 잡힐 때 '오래 전 위치' 기준으로 거리 제한이 사실상 무제한이 되어
      * 화면 다른 곳의 가짜 포즈를 받아들이는 일이 없다(사용자 제보: 그네 영상).
      */
-    private fun anchorToBox(frameBoxes: List<Box>, index: Int) {
-        val ref = last ?: return
-        if (lastIndex < 0) return
+    /** @return 이어 따라간 박스(없으면 null) — Fuse가 긴 포즈 공백을 이 박스로 메운다. */
+    private fun anchorToBox(frameBoxes: List<Box>, index: Int): Box? {
+        val ref = last ?: return null
+        if (lastIndex < 0) return null
         val allowed = jumpBase + maxSpeed * (index - lastIndex) / fps
-        val best = frameBoxes.filter(::climberSized).minByOrNull { hypot(it.cx - ref[0], it.cy - ref[1]) } ?: return
-        if (hypot(best.cx - ref[0], best.cy - ref[1]) > allowed) return
+        val best = frameBoxes.filter(::climberSized).minByOrNull { hypot(it.cx - ref[0], it.cy - ref[1]) } ?: return null
+        if (hypot(best.cx - ref[0], best.cy - ref[1]) > allowed) return null
         last = doubleArrayOf(best.cx, best.cy)
         lastIndex = index
+        return best
     }
 
     /** 공백이 시작된 걸 안 샘플 프레임: 마지막 포즈 프레임의 몸 박스에서 점을 고르고 이 프레임까지 한 번에 따라간다. */
@@ -244,7 +248,7 @@ class Analyzer<F>(
     fun finish(fps: Double): AnalysisResult {
         val fused = Fuse.fuseTrack(
             torso.toTypedArray(), boxes, fps,
-            flow = flowPos.toTypedArray(), flowSeed = flowSeed.toIntArray(),
+            flow = flowPos.toTypedArray(), flowSeed = flowSeed.toIntArray(), anchors = anchors,
         )
         check(fused.track.any { !it[0].isNaN() }) { "영상에서 등반자를 찾지 못했습니다" }
         val body = Fuse.bodyBoxes(raw.toTypedArray(), fused.track, fused.source)
@@ -300,7 +304,9 @@ class Analyzer<F>(
      * 후자는 몸통 추정이 바지 쪽으로 내려가 색이 달라 보이는 진짜 등반자(그네 영상 22.7s) 같은 경우.
      */
     private fun fits(frame: F, index: Int, p: PoseCandidate, dist: Double): Boolean {
-        val sim = lookSimilarity(frame, p) ?: return true
+        // 색을 익힌 뒤 색을 못 잰 포즈(몸통 칸이 너무 작음)는 받지 않는다 — 흐름이 미끄러진 끝의 벽 위 가짜 포즈를
+        // 확인 없이 받아 30초 동안 등반자를 놓쳤다(사용자 제보: 20260525_093059)
+        val sim = lookSimilarity(frame, p) ?: return !lookReady()
         if (sim >= minSimilarity) return true
         if (dist > nearTol) return false
         val t = torsoOf(p)
@@ -319,10 +325,14 @@ class Analyzer<F>(
         return (b.y1 - b.y0) / bodyH in SIZE_RANGE_MIN..SIZE_RANGE_MAX
     }
 
-    /** 화면 전체에서 맞는 포즈가 없을 때: 갈 수 있는 거리 안의 사람 박스 주변만 잘라 가까운 순으로 다시 찾는다. */
+    /**
+     * 화면 전체에서 맞는 포즈가 없을 때: 갈 수 있는 거리 안의 사람 박스 주변만 잘라 가까운 순으로 다시 찾는다.
+     * 거리는 현실적인 등반자 속도(CROP_SPEED)로 — 검출기가 등반자를 0.2초 놓친 순간 바닥의 다른 사람(0.6H)을 받던 문제
+     * (사용자 제보: 20260525_093059). 빠른 동작은 박스 따라가기(anchorToBox, maxSpeed)가 맡고, 오래 놓치면 허용 거리가 늘어난다.
+     */
     private fun aroundPersonBoxes(index: Int, frame: F): PoseCandidate? {
         val ref = last ?: return null
-        val allowed = if (lastIndex < 0) Double.MAX_VALUE else jumpBase + maxSpeed * (index - lastIndex) / fps
+        val allowed = if (lastIndex < 0) Double.MAX_VALUE else jumpBase + CROP_SPEED * (index - lastIndex) / fps
         fun dist(b: Box) = hypot(b.cx - ref[0], b.cy - ref[1])
         return detected(frame, index)
             .filter { dist(it) <= allowed && climberSized(it) }
@@ -377,10 +387,12 @@ class Analyzer<F>(
      * 비교 없이 받아 끝까지 따라가던 문제(점검: 20260821_155813). 익히기 전이면 통과.
      */
     private fun cropLooksRight(frame: F, p: PoseCandidate): Boolean {
-        if (appearance == null || look == null || lookSamples < MIN_LOOK_SAMPLES) return true
+        if (!lookReady()) return true
         val sim = lookSimilarity(frame, p) ?: return false
         return sim >= minSimilarity
     }
+
+    private fun lookReady() = appearance != null && look != null && lookSamples >= MIN_LOOK_SAMPLES
 
     /** 익힌 등반자 색과의 유사도. 아직 못 익혔거나 특징을 못 구하면 null(확인 생략). */
     private fun lookSimilarity(frame: F, p: PoseCandidate): Double? {
@@ -466,6 +478,7 @@ class Analyzer<F>(
         private const val SIZE_RANGE_MIN = 0.4 // 잘라서 찾기·기준 갱신에 쓰는 사람 박스: 등반자 몸 높이의 이 배율 안
         private const val SIZE_RANGE_MAX = 2.5
         private const val SIZE_WINDOW_S = 3.0 // 등반자 크기 기준: 최근 이만큼의 포즈 키 중앙값
+        private const val CROP_SPEED = 1.0 // 프레임 높이/초 — 잘라서 다시 찾을 때 마지막 위치에서 갈 수 있는 속도
         private const val LONG_MISS_S = 1.0 // 이만큼 포즈를 못 찾으면
         private const val LONG_MISS_EVERY = 3 // 이 샘플마다만 사람 박스로 찾는다
         private const val SIZE_KEEP = 5 // 오래 놓친 뒤에도 크기 기준에 남기는 최근 포즈 수(상체만 잡힌 포즈 하나로 줄지 않게)

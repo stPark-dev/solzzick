@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
  * 추적 점검(개발 도구). 갤러리의 등반 영상(1440×1440)을 앱과 같은 경로로 분석해 추적 기록과 1초 간격 썸네일을 남긴다.
  * 평소 테스트에선 건너뛰고, 명시할 때만 돈다:
  *   adb shell pm grant com.zzick.debug android.permission.READ_MEDIA_VIDEO
- *   adb shell am instrument -w -e class com.zzick.TrackAudit -e audit sample|all|<이름,이름> -e out <폴더> [-e hours 9-16] \
+ *   adb shell am instrument -w -e class com.zzick.TrackAudit -e audit sample|all|<이름,이름> -e out <폴더> [-e hours 9-18] \
  *     com.zzick.debug.test/androidx.test.runner.AndroidJUnitRunner
  * 결과: /sdcard/Android/data/com.zzick.debug/files/<폴더>/<영상>.json, <영상>/t000.jpg …  (PC: prototype/tools/audit_tracks.py)
  * 이미 결과가 있는 영상은 건너뛴다(끊겨도 이어서).
@@ -45,9 +45,9 @@ class TrackAudit {
         return out
     }
 
-    /** 파일명(YYYYMMDD_HHMMSS) 시각이 등반 시간대(-e hours 9-16, 기본) 안인지 */
+    /** 파일명(YYYYMMDD_HHMMSS) 시각이 등반 시간대(-e hours 9-18, 기본) 안인지 */
     private fun inHours(v: Video): Boolean {
-        val (from, to) = (args.getString("hours") ?: "9-16").split('-').map(String::toInt)
+        val (from, to) = (args.getString("hours") ?: "9-18").split('-').map(String::toInt)
         val hh = v.name.substringAfter('_', "").take(2).toIntOrNull() ?: return true
         return hh in from until to || (to == 24 && hh >= from)
     }

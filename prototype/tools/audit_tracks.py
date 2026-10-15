@@ -183,7 +183,7 @@ def sheet(dir_: Path, d, segs, out: Path):
     return True
 
 
-HOURS = (9, 16)  # 등반 영상 시간대(기본값) — 파일명(YYYYMMDD_HHMMSS) 시각으로 등반 영상만
+HOURS = (9, 18)  # 등반 영상 시간대(기본값) — 파일명(YYYYMMDD_HHMMSS) 시각으로 등반 영상만
 
 
 def in_hours(name: str, hours=HOURS) -> bool:
@@ -197,7 +197,7 @@ MAX_CLIMB_MS = 120_000  # 등반 영상 최대 길이(기본값) — 이보다 �
 
 
 def is_climb(d) -> bool:
-    """등반 영상으로 볼지 — 등반 시간대(09~16시)에 찍었고 2분 이하"""
+    """등반 영상으로 볼지 — 등반 시간대(09~18시)에 찍었고 2분 이하"""
     return in_hours(d["name"]) and d.get("durationMs", 0) <= MAX_CLIMB_MS
 
 
@@ -233,7 +233,7 @@ def report(dir_: Path):
         if bad and segs:
             sheet(dir_, data[name], [(a, b) for _, a, b in segs], dir_ / "sheets" / f"{name.removesuffix('.mp4')}.jpg")
     lines[2] = (f"영상 {len(summary)}개, 수상한 영상 {flagged}개" + (f" (제외 {len(skip)}개: exclude.txt)" if skip else "")
-                + (f" · 등반 시간대(09~16시) 밖이거나 2분 넘는 영상 {off_hours}개 제외" if off_hours else ""))
+                + (f" · 등반 시간대(09~18시) 밖이거나 2분 넘는 영상 {off_hours}개 제외" if off_hours else ""))
     (dir_ / "report.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 

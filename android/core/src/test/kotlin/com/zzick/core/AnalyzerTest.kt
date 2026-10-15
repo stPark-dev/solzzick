@@ -666,4 +666,72 @@ class AnalyzerTest {
         val late = det.calls.count { it >= 60 } // 80샘플
         assertTrue("검출 $late 번", late <= 40)
     }
+
+    /**
+     * 사용자 제보(20260525_093059): 포즈를 놓친 사이 광학 흐름이 벽 쪽으로 미끄러지고, 그 끝에서 몸통 칸이 너무 작아 색을 못 잰
+     * 가짜 포즈를 화면 전체 포즈라는 이유로 색 확인 없이 받음 → 벽에 붙어 30초 동안 등반자를 놓침.
+     * 색을 익힌 뒤에는 화면 전체 포즈도 색을 잴 수 있고 맞아야 받는다(잘라서 찾은 포즈와 같은 규칙).
+     */
+    @Test
+    fun wholeFramePoseWhoseLookCannotBeMeasuredIsRejected() {
+        val pose = FakePose { i -> if (i < 60) listOf(person(0.5f, 0.5f)) else listOf(person(0.56f, 0.58f)) }
+        val look = object : com.zzick.core.analysis.AppearanceExtractor<Int> {
+            override fun describe(frame: Int, box: Box): FloatArray? = if (frame >= 60) null else floatArrayOf(1f, 0f)
+        }
+        val chosen = mutableMapOf<Int, DoubleArray>()
+        Analyzer(pose, FakeDetector(), w, h, fps, stride = 3, appearance = look, confirmStart = false,
+            onSample = { s -> s.chosen?.let { chosen[s.index] = it } })
+            .apply { for (i in 0 until 120) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        assertTrue("색을 익힌 동안은 받음", (0 until 60 step 3).all { it in chosen })
+        for (i in 60 until 120 step 3) assertTrue("frame $i 색을 못 잰 포즈를 받음", i !in chosen)
+    }
+
+    /**
+     * 사용자 제보(20260525_093059 46.1s): 포즈 모델이 20초 동안 등반자를 못 찾는 사이 검출기 박스로 위치를 따라가다가,
+     * 검출기가 등반자를 잠깐(0.2초) 놓친 순간 0.6H 떨어진 바닥의 다른 사람 박스를 잘라 찾은 포즈를 받음(속도 상한 3H/s면
+     * 0.3초에 0.95H까지 허용) → 24~46초가 그쪽으로 끌려감. 잘라서 다시 찾기는 현실적인 속도(1H/s)로 거리를 제한한다.
+     */
+    @Test
+    fun cropRecoveryIgnoresFarPersonRightAfterLosingTheClimberBox() {
+        fun cx(i: Int) = 0.45 + 0.0005 * i
+        val pose = FakePose(crop = { _, b -> if (b.cx > 0.8) listOf(person(0.87f, 0.8f)) else emptyList() }) { i ->
+            if (i < 30) listOf(person(cx(i).toFloat(), 0.4f)) else emptyList()
+        }
+        val det = FakeDetector { i ->
+            val j = if (i % 2 == 0) 0.01 else -0.01
+            when {
+                i in 90 until 96 -> emptyList() // 등반자 박스를 잠깐 놓침
+                i == 96 -> listOf(Box(0.82, 0.7, 0.92, 0.9)) // 바닥의 다른 사람만
+                else -> listOf(Box(cx(i) - 0.1 + j, 0.2, cx(i) + 0.1, 0.62 - j))
+            }
+        }
+        val chosen = mutableMapOf<Int, DoubleArray>()
+        Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true, onSample = { s -> s.chosen?.let { chosen[s.index] = it } })
+            .apply { for (i in 0 until 150) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for ((i, c) in chosen) assertTrue("frame $i 멀리 있는 다른 사람을 받음 x=${c[0] / w}", c[0] < 0.7 * w)
+    }
+
+    /**
+     * 사용자 제보(20260525_093059 24~48s): 포즈 모델이 24초 동안 등반자를 못 찾는 사이 등반자는 위로 올라갔다 내려옴 —
+     * 검출기는 매 샘플 등반자 박스를 잡지만, 두 포즈 사이 직선 예상 위치에서 멀어 버려지고 화면이 엉뚱한 곳으로 끌려감.
+     * 분석기가 이어서 따라간 박스(anchorToBox)는 직선 예상과 멀어도 쓴다.
+     */
+    @Test
+    fun boxesFollowedThroughLongPoseGapAreUsedEvenFarFromStraightLine() {
+        fun cy(i: Int) = if (i < 150) 0.6 - 0.003 * (i - 30) else 0.24 + 0.003 * (i - 150) // 위로 갔다 내려옴
+        val pose = FakePose { i -> if (i < 30 || i >= 270) listOf(person(0.5f, cy(i).toFloat())) else emptyList() }
+        val det = FakeDetector { i ->
+            val j = if (i % 2 == 0) 0.01 else -0.01
+            listOf(Box(0.4 + j, cy(i) - 0.2, 0.6, cy(i) + 0.2 - j))
+        }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
+            .apply { for (i in 0 until 300) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 120 until 180 step 3) {
+            assertEquals("frame $i src", Fuse.BOX, r.source[i])
+            assertEquals("frame $i y", cy(i) * h, r.track[i][1], 0.05 * h)
+        }
+    }
 }
