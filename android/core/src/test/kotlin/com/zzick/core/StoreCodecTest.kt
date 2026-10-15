@@ -73,6 +73,14 @@ class StoreCodecTest {
         assertNull(AnalysisCodec.read(ByteArrayInputStream(bytes)))
     }
 
+    /** 0.4.4에서 추적이 바뀌었다(색 못 잰 포즈 거절·잘라 찾기 거리·이어 따라간 박스 사용) — 버전 3 저장본도 버린다. */
+    @Test
+    fun analysesSavedBefore044AreDiscarded() {
+        val bytes = ByteArrayOutputStream().also { AnalysisCodec.write(record(null, null), it) }.toByteArray()
+        java.nio.ByteBuffer.wrap(bytes).putInt(4, 3) // 버전 3으로 저장된 파일
+        assertNull(AnalysisCodec.read(ByteArrayInputStream(bytes)))
+    }
+
     /** 깨진 저장본의 프레임 수가 터무니없으면 메모리를 잡기 전에 거절(1시간 60fps = 21.6만 프레임). */
     @Test
     fun absurdFrameCountIsRejected() {

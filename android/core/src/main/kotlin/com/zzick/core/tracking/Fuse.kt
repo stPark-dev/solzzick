@@ -54,6 +54,7 @@ object Fuse {
     /**
      * @param flow 포즈 공백 동안 광학 흐름으로 따라간 위치(프레임별, 없으면 NaN)
      * @param flowSeed 그 흐름을 시작한 포즈 프레임(-1: 없음). 시작 포즈가 이상값으로 버려지면 그 흐름도 쓰지 않는다.
+     * @param anchors 분석기가 직전 위치에서 이어 따라간 등반자 박스(프레임별, 없으면 null) — 직선 예상 위치와 멀어도 쓴다. Kotlin 분석기 전용(Python 기준 구현엔 없음).
      */
     fun fuseTrack(
         pose: Array<DoubleArray>,
@@ -64,6 +65,7 @@ object Fuse {
         jumpBase: Double = 0.05,
         flow: Array<DoubleArray>? = null,
         flowSeed: IntArray? = null,
+        anchors: List<Box?>? = null,
     ): FusedTrack {
         val p = rejectOutliers(rejectJumps(pose, fps, maxSpeed, jumpBase), fps)
         val n = p.size
@@ -78,7 +80,15 @@ object Fuse {
         val predicted = interpColumns(track)
         val off = boxOffset(p, boxes)
         for (i in first + 1 until last) {
-            if (ok[i] || source[i] == FLOW || boxes[i].isEmpty()) continue
+            if (ok[i] || source[i] == FLOW) continue
+            // 분석기가 직전 위치에서 이어 따라간 박스는 직선 예상과 멀어도 쓴다(긴 공백에 올라갔다 내려오는 등반자 — 20260525_093059)
+            val anchor = anchors?.getOrNull(i)
+            if (anchor != null) {
+                track[i] = doubleArrayOf(anchor.cx, anchor.cy - off * anchor.height)
+                source[i] = BOX
+                continue
+            }
+            if (boxes[i].isEmpty()) continue
             val (ex, ey) = predicted[i]
             val best = boxes[i]
                 .map { doubleArrayOf(it.cx, it.cy - off * it.height) }
