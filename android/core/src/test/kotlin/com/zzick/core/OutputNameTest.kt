@@ -26,4 +26,8 @@ class OutputNameTest {
 
     @Test fun captureTimeIsReadInLocalTime() =
         assertEquals(taken, CaptureDate.parseDateTime("20260525T003059.000Z", ZoneId.of("Asia/Seoul")))
+
+    /** 리뷰에서 찾음: 더 긴 숫자열의 일부를 일시로 잡지 않는다. */
+    @Test fun digitsInsideLongerNumbersAreNotATime() =
+        assertEquals("solzzick_20260525_093059.mp4", OutputName.forSource(taken, "IMG_123456789_1234567.mp4", now))
 }

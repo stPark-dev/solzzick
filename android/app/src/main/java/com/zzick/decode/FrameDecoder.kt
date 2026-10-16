@@ -74,11 +74,14 @@ class FrameDecoder(private val setSource: (MediaExtractor) -> Unit, targetHeight
     /**
      * @param wantPixels false인 프레임은 GPU 읽기를 건너뛰고 이전 내용의 비트맵을 그대로 넘긴다(그 프레임의 픽셀은 쓰지 말 것).
      * @param stop 매 프레임 뒤 확인해 true면 디코드를 멈춘다.
+     * @param frameBitmap 주면 프레임마다 이 비트맵(width × height, ARGB_8888)에 그린다 — 다른 스레드로 넘겨 쓰는 경우.
+     *   없으면 비트맵 하나를 다시 쓴다(콜백 안에서만 유효).
      */
     fun decode(
         maxFrames: Int = Int.MAX_VALUE,
         wantPixels: (index: Int) -> Boolean = { true },
         stop: () -> Boolean = { false },
+        frameBitmap: ((index: Int) -> Bitmap)? = null,
         onFrame: (index: Int, ptsUs: Long, frame: Bitmap) -> Unit,
     ): Int {
         // 모든 자원은 try 안에서 만들고 finally에서 하나씩 독립적으로 해제한다.
@@ -110,7 +113,7 @@ class FrameDecoder(private val setSource: (MediaExtractor) -> Unit, targetHeight
             }
             val codecFormat = MediaFormat(format).apply { setInteger(MediaFormat.KEY_ROTATION, 0) } // 회전은 셰이더가 처리
             codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
-            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            if (frameBitmap == null) bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             codec.configure(codecFormat, surface, null, 0)
             codec.start()
             val info = MediaCodec.BufferInfo()
@@ -132,6 +135,7 @@ class FrameDecoder(private val setSource: (MediaExtractor) -> Unit, targetHeight
                 }
                 val outIdx = codec.dequeueOutputBuffer(info, 10_000)
                 if (outIdx < 0) {
+                    if (stop()) break // 멈추라면 출력을 기다리지 않는다
                     check(SystemClock.elapsedRealtime() - lastOutputAt < STALL_MS) { "디코더가 응답하지 않습니다 (frame $count)" }
                     continue
                 }
@@ -149,8 +153,9 @@ class FrameDecoder(private val setSource: (MediaExtractor) -> Unit, targetHeight
                         available = false
                     }
                     st.updateTexImage()
-                    if (wantPixels(count)) gl.draw(st, bitmap)
-                    onFrame(count++, info.presentationTimeUs, bitmap)
+                    val target = frameBitmap?.invoke(count) ?: bitmap!!
+                    if (wantPixels(count)) gl.draw(st, target)
+                    onFrame(count++, info.presentationTimeUs, target)
                 }
                 if (count >= maxFrames || stop() || info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
             }

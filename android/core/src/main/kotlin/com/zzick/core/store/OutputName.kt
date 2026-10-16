@@ -9,7 +9,7 @@ import java.time.format.DateTimeFormatter
  * 같은 이름이 있으면 안드로이드가 " (1)"을 붙인다. 한글은 넣지 않는다(외부로 옮길 때 깨질 수 있음).
  */
 object OutputName {
-    private val IN_NAME = Regex("""(\d{8}_\d{6})""")
+    private val IN_NAME = Regex("""(?<!\d)(\d{8}_\d{6})(?!\d)""") // 더 긴 숫자열의 일부는 아니게
     private val FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
 
     fun forSource(captureTime: LocalDateTime?, sourceName: String?, now: LocalDateTime): String {

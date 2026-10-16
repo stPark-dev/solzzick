@@ -76,6 +76,10 @@ class OnDeviceBenchmark {
             val preview = pipeline.findPeople(src)
             val findMs = SystemClock.elapsedRealtime() - t
             val tap = preview?.boxes?.takeIf { it.size > 1 }?.maxBy { it.height }?.center
+            // 순차 디코딩과 미리 디코딩을 같은 실행에서 번갈아(폰 상태로 측정이 흔들려서)
+            t = SystemClock.elapsedRealtime()
+            pipeline.analyze(src, tap, decodeAhead = false) {}
+            val analyzeSeqMs = SystemClock.elapsedRealtime() - t
             t = SystemClock.elapsedRealtime()
             val analysis = pipeline.analyze(src, tap) {}
             val analyzeMs = SystemClock.elapsedRealtime() - t
@@ -88,7 +92,7 @@ class OnDeviceBenchmark {
             val info = pipeline.sourceInfo(src)
             results.put(JSONObject().put("video", name).put("size", "${info.width}x${info.height}").put("fps", info.fps)
                 .put("duration_s", (analysis.lastPtsUs - analysis.firstPtsUs) / 1e6).put("trim_s", trim.durationUs / 1e6)
-                .put("find_people_ms", findMs).put("analyze_ms", analyzeMs).put("render_ms", renderMs).put("out_bytes", out.length()))
+                .put("find_people_ms", findMs).put("analyze_seq_ms", analyzeSeqMs).put("analyze_ms", analyzeMs).put("render_ms", renderMs).put("out_bytes", out.length()))
             out.delete()
             File(this.out, "user_wait.json").writeText(results.toString(2))
             Log.i(TAG, results.getJSONObject(results.length() - 1).toString())

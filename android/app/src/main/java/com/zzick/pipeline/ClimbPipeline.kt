@@ -37,6 +37,7 @@ import com.zzick.core.trim.TrimWindow
 import com.zzick.core.vcam.CameraParams
 import com.zzick.core.vcam.VirtualCamera
 import com.zzick.decode.FrameDecoder
+import com.zzick.decode.decodeAhead
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -158,7 +159,7 @@ class ClimbPipeline(private val context: Context) {
     }
 
     /**
-     * 호출 스레드에서 끝까지 실행된다(GL 컨텍스트를 이 스레드에 만든다). UI 스레드에서 부르지 말 것.
+     * 호출 스레드에서 끝까지 실행된다(추론은 이 스레드, 디코딩은 decodeAhead면 별도 스레드 — 순차면 GL 컨텍스트도 이 스레드). UI 스레드에서 부르지 말 것.
      * @param tap 사용자가 고른 등반자 위치(프레임 폭/높이 기준 0..1). 주면 여러 명 중 그 사람을 따라간다.
      * @throws CancellationException isCancelled가 true가 되면 즉시 멈춘다(프레임마다 확인).
      */
@@ -168,6 +169,7 @@ class ClimbPipeline(private val context: Context) {
         isCancelled: () -> Boolean = { false },
         opticalFlow: Boolean = true, // 포즈 공백을 광학 흐름으로 메우기(끄는 건 비교 측정용)
         onSample: ((SampleReport) -> Unit)? = null, // 진단 기록(추적 점검·문제 신고)
+        decodeAhead: Boolean = true, // 디코딩을 별도 스레드에서 미리(끄는 건 비교 측정용 — 결과는 같다)
         onProgress: (Float) -> Unit,
     ): Analysis {
         val dec = decoder(uri)
@@ -181,13 +183,15 @@ class ClimbPipeline(private val context: Context) {
                 )
                 var lastPts = 0L
                 var firstPts = 0L
-                // 포즈 추정 프레임 + 광학 흐름으로 따라가는 공백 구간만 픽셀을 읽는다
-                val n = dec.decode(wantPixels = analyzer::needsPixels, stop = isCancelled) { i, pts, bmp ->
+                val onFrame = { i: Int, pts: Long, bmp: Bitmap ->
                     if (i == 0) firstPts = pts
                     lastPts = pts
                     analyzer.onFrame(i, pts, bmp)
                     if (i % 30 == 0) onProgress((i / expected).toFloat().coerceAtMost(0.99f))
                 }
+                // 미리 디코딩하면 모든 프레임을 읽고, 순차일 때는 포즈 추정 프레임 + 광학 흐름으로 따라가는 공백 구간만 읽는다
+                val n = if (decodeAhead) dec.decodeAhead(stop = isCancelled, onFrame = onFrame)
+                else dec.decode(wantPixels = analyzer::needsPixels, stop = isCancelled, onFrame = onFrame)
                 if (isCancelled()) throw CancellationException("사용자 취소")
                 val fps = if (n > 1 && lastPts > firstPts) (n - 1) * 1e6 / (lastPts - firstPts) else dec.frameRate
                 val result = analyzer.finish(fps)
