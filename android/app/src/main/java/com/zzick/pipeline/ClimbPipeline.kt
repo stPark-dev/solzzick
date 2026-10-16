@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
@@ -28,6 +29,7 @@ import com.zzick.core.analysis.SampleReport
 import com.zzick.core.overlay.CaptureDate
 import com.zzick.core.overlay.OverlayInfo
 import com.zzick.core.quality.SourceInfo
+import com.zzick.core.store.OutputName
 import com.zzick.core.tracking.Box
 import com.zzick.core.tracking.showsClimber
 import com.zzick.core.trim.Trim
@@ -40,6 +42,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.concurrent.CancellationException
 import kotlin.coroutines.resume
@@ -85,7 +88,9 @@ class ClimbPipeline(private val context: Context) {
     }
 
     /** 원본을 찍은 날짜(이 기기 시간대). 영상에 기록이 없으면 null. */
-    fun captureDate(uri: Uri): LocalDate? = runCatching {
+    fun captureDate(uri: Uri): LocalDate? = captureDateTime(uri)?.toLocalDate()
+
+    private fun captureDateTime(uri: Uri): LocalDateTime? = runCatching {
         val raw = MediaMetadataRetriever().run {
             try {
                 setDataSource(context, uri)
@@ -94,8 +99,18 @@ class ClimbPipeline(private val context: Context) {
                 release()
             }
         }
-        CaptureDate.parse(raw, ZoneId.systemDefault())
+        CaptureDate.parseDateTime(raw, ZoneId.systemDefault())
     }.getOrNull()
+
+    /** 결과 영상 파일명(solzzick_<원본 촬영 일시>.mp4 — OutputName). 디스크·메타데이터를 읽으니 백그라운드에서. */
+    fun outputName(uri: Uri): String {
+        val shown = runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else null
+            }
+        }.getOrNull() ?: uri.lastPathSegment
+        return OutputName.forSource(captureDateTime(uri), shown, LocalDateTime.now())
+    }
 
     /** 화질 안내용 원본 정보. 비트레이트는 파일 크기 / 길이(오디오 포함), 모르면 0. */
     fun sourceInfo(uri: Uri): SourceInfo = sourceInfo(uri, decoder(uri))

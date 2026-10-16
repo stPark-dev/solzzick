@@ -194,8 +194,8 @@ class BatchProcessor(
     private suspend fun render(uri: Uri, id: Int) {
         val q = _state.value
         val item = q.item(id)
-        val name = "zzick_${System.currentTimeMillis()}.mp4"
-        val out = File(app.cacheDir, name)
+        val name = withContext(Dispatchers.IO) { pipeline.outputName(uri) } // solzzick_<원본 촬영 일시>.mp4
+        val out = File(app.cacheDir, "render_${System.currentTimeMillis()}.mp4")
         val galleryUri = try {
             pipeline.render(uri, item.analysis!!, q.settingsFor(id).toParams(), out, item.window, overlay = q.settingsFor(id).overlay) { p ->
                 _state.update { it.onProgress(id, p) }
