@@ -142,8 +142,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         launchSafely {
             _state.value = EditorState.Rendering(0f)
             val ctx = getApplication<Application>()
-            val name = "zzick_${System.currentTimeMillis()}.mp4"
-            val out = File(ctx.cacheDir, name)
+            val name = withContext(worker) { pipeline.outputName(t.uri) } // solzzick_<원본 촬영 일시>.mp4
+            val out = File(ctx.cacheDir, "render_${System.currentTimeMillis()}.mp4")
             val galleryUri = try {
                 pipeline.render(t.uri, t.analysis, t.settings.toParams(), out, t.window, overlay = t.settings.overlay) {
                     _state.value = EditorState.Rendering(it)

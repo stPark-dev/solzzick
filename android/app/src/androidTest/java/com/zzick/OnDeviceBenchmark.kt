@@ -65,6 +65,40 @@ class OnDeviceBenchmark {
         File(out, "bitrate.json").writeText(results.toString(2))
     }
 
+    /** 사용자가 기다리는 시간: 사람 찾기 → 분석 → 내보내기(앱 기본 설정, 자동 트리밍 구간). 영상 길이 대비로 본다. */
+    @Test
+    fun benchmarkUserWait() {
+        val results = JSONArray()
+        for (name in listOf("20261011_105654.mp4", "uhd60.mp4", "fps60.mp4")) {
+            val src = android.net.Uri.fromFile(video(name))
+            val pipeline = com.zzick.pipeline.ClimbPipeline(ctx)
+            var t = SystemClock.elapsedRealtime()
+            val preview = pipeline.findPeople(src)
+            val findMs = SystemClock.elapsedRealtime() - t
+            val tap = preview?.boxes?.takeIf { it.size > 1 }?.maxBy { it.height }?.center
+            // 순차 디코딩과 미리 디코딩을 같은 실행에서 번갈아(폰 상태로 측정이 흔들려서)
+            t = SystemClock.elapsedRealtime()
+            pipeline.analyze(src, tap, decodeAhead = false) {}
+            val analyzeSeqMs = SystemClock.elapsedRealtime() - t
+            t = SystemClock.elapsedRealtime()
+            val analysis = pipeline.analyze(src, tap) {}
+            val analyzeMs = SystemClock.elapsedRealtime() - t
+            val trim = analysis.suggestTrim()
+            val out = File(out, "wait_$name").apply { delete() }
+            val settings = com.zzick.core.vcam.EditSettings()
+            t = SystemClock.elapsedRealtime()
+            kotlinx.coroutines.runBlocking { pipeline.render(src, analysis, settings.toParams(), out, trim, overlay = settings.overlay) {} }
+            val renderMs = SystemClock.elapsedRealtime() - t
+            val info = pipeline.sourceInfo(src)
+            results.put(JSONObject().put("video", name).put("size", "${info.width}x${info.height}").put("fps", info.fps)
+                .put("duration_s", (analysis.lastPtsUs - analysis.firstPtsUs) / 1e6).put("trim_s", trim.durationUs / 1e6)
+                .put("find_people_ms", findMs).put("analyze_seq_ms", analyzeSeqMs).put("analyze_ms", analyzeMs).put("render_ms", renderMs).put("out_bytes", out.length()))
+            out.delete()
+            File(this.out, "user_wait.json").writeText(results.toString(2))
+            Log.i(TAG, results.getJSONObject(results.length() - 1).toString())
+        }
+    }
+
     /** 사용자 제보 영상을 현재 코드로 렌더(수정 전후 육안 비교용). 결과는 bench/swing_fixed.mp4 */
     @Test
     fun renderSwingVideo() {

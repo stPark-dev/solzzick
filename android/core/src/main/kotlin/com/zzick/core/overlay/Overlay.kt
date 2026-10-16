@@ -49,13 +49,16 @@ data class OverlayInfo(
 object CaptureDate {
     private val FORM = Regex("""(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?""")
 
-    fun parse(raw: String?, zone: java.time.ZoneId): LocalDate? {
+    fun parse(raw: String?, zone: java.time.ZoneId): LocalDate? = parseDateTime(raw, zone)?.toLocalDate()
+
+    /** 촬영 일시(그 지역 시각). 결과 파일명에 쓴다. */
+    fun parseDateTime(raw: String?, zone: java.time.ZoneId): java.time.LocalDateTime? {
         val m = FORM.matchEntire(raw?.trim() ?: return null) ?: return null
         val (y, mo, d, h, mi, s) = m.destructured
         val offset = m.groupValues[7].let { if (it.isEmpty() || it == "Z") java.time.ZoneOffset.UTC else java.time.ZoneOffset.of(it) }
         return runCatching {
             java.time.OffsetDateTime.of(y.toInt(), mo.toInt(), d.toInt(), h.toInt(), mi.toInt(), s.toInt(), 0, offset)
-                .atZoneSameInstant(zone).toLocalDate()
+                .atZoneSameInstant(zone).toLocalDateTime()
         }.getOrNull()?.takeIf { it.year >= 2000 } // 1904·0000 같은 빈 값 제외
     }
 }
