@@ -1,5 +1,6 @@
 package com.zzick.ui.quote
 
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,7 +20,7 @@ import com.zzick.ui.Brand
 /** 고운바탕(OFL) — 명언용 명조(사용자 선택: 더 세련된 글꼴) */
 val QuoteSerif = FontFamily(Font(R.font.gowun_batang))
 
-/** 명언 + 줄 바꿔 "-말한 사람-" */
+/** 명언 한 줄(넘치면 전광판처럼 흘러감, 사용자 요청) + 줄 바꿔 "-말한 사람-" */
 @Composable
 fun QuoteView(quote: Quote, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -27,9 +28,11 @@ fun QuoteView(quote: Quote, modifier: Modifier = Modifier) {
             quote.message,
             fontFamily = QuoteSerif,
             fontSize = 22.sp,
-            lineHeight = 34.sp,
+            maxLines = 1,
+            softWrap = false,
             textAlign = TextAlign.Center,
             color = Brand.Ink,
+            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1_500, velocity = 40.dp),
         )
         Text("-${quote.author}-", fontFamily = QuoteSerif, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
     }
