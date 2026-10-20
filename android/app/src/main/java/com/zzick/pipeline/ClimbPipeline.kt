@@ -27,6 +27,7 @@ import com.zzick.core.analysis.AnalysisResult
 import com.zzick.core.analysis.Analyzer
 import com.zzick.core.analysis.SampleReport
 import com.zzick.core.overlay.CaptureDate
+import com.zzick.core.overlay.Grade
 import com.zzick.core.overlay.OverlayInfo
 import com.zzick.core.quality.SourceInfo
 import com.zzick.core.store.OutputName
@@ -103,14 +104,14 @@ class ClimbPipeline(private val context: Context) {
         CaptureDate.parseDateTime(raw, ZoneId.systemDefault())
     }.getOrNull()
 
-    /** 결과 영상 파일명(solzzick_<원본 촬영 일시>.mp4 — OutputName). 디스크·메타데이터를 읽으니 백그라운드에서. */
-    fun outputName(uri: Uri): String {
+    /** 결과 영상 파일명(solzzick_<원본 촬영 일시>[_<난이도 색>].mp4 — OutputName). 디스크·메타데이터를 읽으니 백그라운드에서. */
+    fun outputName(uri: Uri, grade: Grade? = null): String {
         val shown = runCatching {
             context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                 if (it.moveToFirst()) it.getString(0) else null
             }
         }.getOrNull() ?: uri.lastPathSegment
-        return OutputName.forSource(captureDateTime(uri), shown, LocalDateTime.now())
+        return OutputName.forSource(captureDateTime(uri), shown, LocalDateTime.now(), grade)
     }
 
     /** 화질 안내용 원본 정보. 비트레이트는 파일 크기 / 길이(오디오 포함), 모르면 0. */

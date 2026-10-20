@@ -112,4 +112,11 @@ class BatchListUiTest {
         compose.onNodeWithText("빼기").performClick()
         assertEquals(listOf("rename:$j:서울숲", "remove:$j"), r.calls)
     }
+
+    /** 첫 화면에서 작업 목록을 늘 열 수 있게 됨 — 작업이 없으면 만드는 법을 알려 준다. */
+    @Test
+    fun emptyJobListExplainsHowToStart() {
+        compose.setContent { JobList(BatchQueue(), JobRecorder()) }
+        compose.onNodeWithText("아직 작업이 없어요", substring = true).assertExists()
+    }
 }
