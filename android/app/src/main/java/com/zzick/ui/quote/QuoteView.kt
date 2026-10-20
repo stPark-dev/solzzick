@@ -16,8 +16,8 @@ import androidx.compose.ui.unit.sp
 import com.zzick.R
 import com.zzick.ui.Brand
 
-/** 나눔손글씨 붓(OFL) — 명언용 필기체 */
-val BrushScript = FontFamily(Font(R.font.nanum_brush_script))
+/** 고운바탕(OFL) — 명언용 명조(사용자 선택: 더 세련된 글꼴) */
+val QuoteSerif = FontFamily(Font(R.font.gowun_batang))
 
 /** 명언 + 줄 바꿔 "-말한 사람-" */
 @Composable
@@ -25,12 +25,12 @@ fun QuoteView(quote: Quote, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(
             quote.message,
-            fontFamily = BrushScript,
-            fontSize = 34.sp,
-            lineHeight = 42.sp,
+            fontFamily = QuoteSerif,
+            fontSize = 22.sp,
+            lineHeight = 34.sp,
             textAlign = TextAlign.Center,
             color = Brand.Ink,
         )
-        Text("-${quote.author}-", fontFamily = BrushScript, fontSize = 26.sp, color = MaterialTheme.colorScheme.primary)
+        Text("-${quote.author}-", fontFamily = QuoteSerif, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
     }
 }

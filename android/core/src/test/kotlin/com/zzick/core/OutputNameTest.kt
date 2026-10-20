@@ -1,8 +1,10 @@
 package com.zzick.core
 
 import com.zzick.core.overlay.CaptureDate
+import com.zzick.core.overlay.Grade
 import com.zzick.core.store.OutputName
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -30,4 +32,11 @@ class OutputNameTest {
     /** 리뷰에서 찾음: 더 긴 숫자열의 일부를 일시로 잡지 않는다. */
     @Test fun digitsInsideLongerNumbersAreNotATime() =
         assertEquals("solzzick_20260525_093059.mp4", OutputName.forSource(taken, "IMG_123456789_1234567.mp4", now))
+
+    /** 사용자 요청: 난이도를 고르면 파일명에 영문 색 이름을 붙인다(pink, purple, yellow …). */
+    @Test fun gradeColorIsAppended() =
+        assertEquals("solzzick_20260525_093059_purple.mp4", OutputName.forSource(null, "20260525_093059.mp4", now, Grade.PURPLE))
+
+    @Test fun everyGradeHasAPlainLowercaseName() =
+        Grade.entries.forEach { g -> assertTrue("$g", OutputName.forSource(null, null, now, g).matches(Regex("""solzzick_\d{8}_\d{6}_[a-z]+\.mp4"""))) }
 }

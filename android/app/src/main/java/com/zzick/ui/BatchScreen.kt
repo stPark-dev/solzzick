@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -140,6 +141,15 @@ fun JobList(q: BatchQueue<Analysis>, actions: JobActions) {
             StatusPill("작업 ${q.jobs.size}개", Brand.Orange, Modifier.padding(start = 8.dp))
             Spacer(Modifier.weight(1f))
             TextButton(onClick = actions::close) { Text("닫기", color = Brand.InkSoft) }
+        }
+        if (q.jobs.isEmpty()) {
+            Text(
+                "아직 작업이 없어요.\n처음 화면의 영상 선택 → 여러 영상 일괄 편집으로 영상을 고르면 여기에 작업이 생겨요.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Brand.InkSoft,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 40.dp),
+            )
         }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
             items(q.jobs.reversed(), key = { it.id }) { job ->

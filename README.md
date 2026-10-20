@@ -200,5 +200,5 @@ git tag v0.3.2 && git push origin main --tags   # 테스트 → 서명 빌드 �
 
 - [MediaPipe](https://github.com/google-ai-edge/mediapipe) Pose Landmarker · Object Detector — Apache 2.0
 - [AndroidX Media3](https://github.com/androidx/media) Transformer · ExoPlayer — Apache 2.0
-- [나눔손글씨 붓](https://github.com/google/fonts/tree/main/ofl/nanumbrushscript) — SIL Open Font License 1.1 ([전문](android/licenses/NanumBrushScript-OFL.txt))
+- [고운바탕](https://github.com/google/fonts/tree/main/ofl/gowunbatang) — SIL Open Font License 1.1 ([전문](android/licenses/GowunBatang-OFL.txt))
 - [korean-advice-open-api](https://github.com/gwongibeom/korean-advice-open-api) — 첫 화면 랜덤 명언

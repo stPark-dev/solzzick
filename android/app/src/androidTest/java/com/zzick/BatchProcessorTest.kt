@@ -49,16 +49,17 @@ class BatchProcessorTest {
         assertEquals(listOf(Stage.READY, Stage.READY), ready.items.map { it.stage })
         ready.items.forEach { assertNotNull(it.window); assertNotNull(it.analysis) }
 
-        withContext(Dispatchers.Main) { p.renderAll(job) }
+        val pink = com.zzick.core.vcam.EditSettings(overlay = com.zzick.core.overlay.OverlayInfo(grade = com.zzick.core.overlay.Grade.PINK))
+        withContext(Dispatchers.Main) { p.setCommon(job, pink); p.renderAll(job) }
         val done = p.awaitState(240_000) { q -> q.items.all { it.stage == Stage.DONE || it.stage == Stage.FAILED } }
         assertEquals(listOf(Stage.DONE, Stage.DONE), done.items.map { it.stage })
         for (item in done.items) {
             val uri = Uri.parse(item.output)
-            // 결과 이름은 solzzick_<원본 촬영 일시> — 원본과 짝을 찾게(같은 이름이 있으면 " (1)"이 붙을 수 있음)
+            // 결과 이름은 solzzick_<원본 촬영 일시>_<난이도> — 원본과 짝을 찾게(같은 이름이 있으면 " (1)"이 붙을 수 있음)
             val stamp = Regex("""\d{8}_\d{6}""").find(item.source)!!.value
             ctx.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)!!.use {
                 assertTrue(it.moveToFirst())
-                assertTrue("결과 이름: ${it.getString(0)}", it.getString(0).startsWith("solzzick_$stamp"))
+                assertTrue("결과 이름: ${it.getString(0)}", it.getString(0).startsWith("solzzick_${stamp}_pink"))
             }
             ctx.contentResolver.delete(uri, null, null)
         }

@@ -3,7 +3,6 @@ package com.zzick.ui
 import android.content.Intent
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Box
-import com.zzick.ui.quote.QuoteView
 import com.zzick.ui.quote.QuoteFeed
 import com.zzick.ui.quote.Quote
 import androidx.lifecycle.lifecycleScope
@@ -13,7 +12,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.material3.TextButton
 import androidx.activity.compose.BackHandler
 import android.os.Build
 import android.net.Uri
@@ -53,11 +51,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
@@ -150,40 +145,15 @@ private fun EditorScreen(vm: EditorViewModel, processor: BatchProcessor, openBat
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         when (val s = state) {
-            EditorState.Idle -> Column(
-                Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                BouncyLogo(Modifier.height(96.dp))
-                Spacer(Modifier.weight(1f))
+            EditorState.Idle -> {
                 val quote by produceState<Quote?>(null) { value = QuoteFeed.next() }
-                quote?.let {
-                    BrandCard(Modifier.fillMaxWidth()) { QuoteView(it, Modifier.padding(horizontal = 20.dp, vertical = 28.dp)) }
-                }
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "고정 촬영한 등반 영상을\n누가 들고 찍어준 것처럼!",
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = TextAlign.Center,
+                HomeScreen(
+                    jobCount = batchQueue.jobs.size,
+                    quote = quote,
+                    onPickOne = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                    onPickMany = { multiPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                    onOpenJobs = { openBatch(null) },
                 )
-                SunsetButton(onClick = {
-                    picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
-                }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("영상 선택", fontSize = 18.sp)
-                }
-                PillOutlinedButton(onClick = {
-                    multiPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
-                }, modifier = Modifier.fillMaxWidth(), color = Brand.HoldBlue) {
-                    Icon(Icons.Filled.Add, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("여러 영상 일괄 편집")
-                }
-                if (batchQueue.items.isNotEmpty()) {
-                    TextButton(onClick = { openBatch(null) }) { Text("일괄 편집 작업 보기 (작업 ${batchQueue.jobs.size}개)", color = Brand.HoldBlue) }
-                }
             }
             EditorState.Scanning -> {
                 BouncyLogo(Modifier.height(80.dp))
