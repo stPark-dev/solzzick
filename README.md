@@ -32,7 +32,12 @@
   &nbsp;&nbsp;
   <img src="docs/images/edit.jpg" alt="편집 화면" height="420">
 </p>
-<p align="center"><sub>스플래시 → 오늘의 명언이 있는 첫 화면 → 실시간 미리보기 편집 화면</sub></p>
+<p align="center"><sub>스플래시 → 첫 화면(영상 선택 · 작업 목록 · 오늘의 명언) → 실시간 미리보기 편집 화면</sub></p>
+
+<p align="center">
+  <img src="docs/images/batch.jpg" alt="영상 선택 창과 작업 목록" height="420">
+</p>
+<p align="center"><sub>영상 선택: 1개 편집 / 여러 영상 일괄 편집(ⓘ 안내) → 작업 목록(골라 넣을 때마다 작업 하나)</sub></p>
 
 ## 주요 기능
 
