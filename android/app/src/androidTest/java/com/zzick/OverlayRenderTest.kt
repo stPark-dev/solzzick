@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.zzick.core.overlay.Corner
 import com.zzick.core.overlay.Grade
 import com.zzick.core.overlay.OverlayInfo
 import com.zzick.core.trim.TrimWindow
@@ -35,12 +36,33 @@ class OverlayRenderTest {
         assertEquals(LocalDate.of(2026, 9, 27), pipeline.captureDate(src))
     }
 
-    /** 암장 이름·날짜 표시는 다음 영상에도, 난이도(문제마다 다름)는 기억하지 않는다. */
+    /** 암장 이름·날짜 표시·구석은 다음 영상에도, 난이도(문제마다 다름)는 기억하지 않는다. */
     @Test
-    fun remembersGymAndDateButNotGrade() {
-        OverlayPrefs(ctx).save(OverlayInfo(gym = "더클라임", showDate = true, grade = Grade.RED))
-        assertEquals(OverlayInfo(gym = "더클라임", showDate = true), OverlayPrefs(ctx).load())
+    fun remembersGymDateAndCornerButNotGrade() {
+        OverlayPrefs(ctx).save(OverlayInfo(gym = "더클라임", showDate = true, grade = Grade.RED, corner = Corner.TOP_RIGHT))
+        assertEquals(OverlayInfo(gym = "더클라임", showDate = true, corner = Corner.TOP_RIGHT), OverlayPrefs(ctx).load())
         OverlayPrefs(ctx).save(OverlayInfo())
+        assertEquals(Corner.BOTTOM_LEFT, OverlayPrefs(ctx).load().corner)
+    }
+
+    /** 사용자 요청: 고른 구석에만 그린다(네 구석 모두). */
+    @Test
+    fun overlayImageDrawsOnlyInTheChosenCorner() {
+        for (corner in Corner.entries) {
+            val bmp = OverlayImage.render(Grade.PINK, "더클라임 강남 · 2026.10.11", 1080, 1920, corner)!!
+            val left = corner == Corner.TOP_LEFT || corner == Corner.BOTTOM_LEFT
+            val top = corner == Corner.TOP_LEFT || corner == Corner.TOP_RIGHT
+            var inside = 0
+            var outside = 0
+            for (y in 0 until 1920 step 4) for (x in 0 until 1080 step 4) {
+                if (bmp.getPixel(x, y) ushr 24 == 0) continue
+                val inX = if (left) x < 1080 * 0.75 else x > 1080 * 0.25
+                val inY = if (top) y < 1920 * 0.15 else y > 1920 * 0.85
+                if (inX && inY) inside++ else outside++
+            }
+            assertTrue("$corner 표시가 그려지지 않음", inside > 100)
+            assertEquals("$corner 밖에 그려짐", 0, outside)
+        }
     }
 
     @Test

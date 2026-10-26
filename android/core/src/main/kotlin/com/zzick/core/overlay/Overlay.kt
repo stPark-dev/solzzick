@@ -22,11 +22,28 @@ enum class Grade(val emoji: String, val label: String, val argb: Int) {
     WHITE("🤍", "흰색", 0xFFFAFAFA.toInt()),
 }
 
+/** 표시를 넣을 구석(사용자 요청: 네 구석 중 선택, 기본은 왼쪽 아래). */
+enum class Corner(val label: String) {
+    TOP_LEFT("왼쪽 위"),
+    TOP_RIGHT("오른쪽 위"),
+    BOTTOM_LEFT("왼쪽 아래"),
+    BOTTOM_RIGHT("오른쪽 아래"),
+    ;
+
+    /** w×h 화면에서 bw×bh 표시의 왼쪽 위 좌표. 여백은 가로 m, 세로 1.5m. */
+    fun place(w: Float, h: Float, bw: Float, bh: Float, m: Float): Pair<Float, Float> {
+        val left = if (this == TOP_LEFT || this == BOTTOM_LEFT) m else w - m - bw
+        val top = if (this == TOP_LEFT || this == TOP_RIGHT) m * 1.5f else h - m * 1.5f - bh
+        return left to top
+    }
+}
+
 /** 결과 영상 구석에 넣을 정보. 모두 선택 사항 — 아무것도 고르지 않으면 표시하지 않는다. */
 data class OverlayInfo(
     val gym: String = "",
     val showDate: Boolean = false, // 원본을 찍은 날짜
     val grade: Grade? = null,
+    val corner: Corner = Corner.BOTTOM_LEFT,
 ) {
     /** 표시할 한 줄("❤️ 더클라임 강남 · 2026.10.11"). 표시할 게 없으면 null. */
     fun text(captureDate: LocalDate?): String? =

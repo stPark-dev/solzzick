@@ -81,5 +81,7 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     androidTestImplementation("androidx.test:runner:1.6.2")
+    // 안드로이드 17(API 37)에서 옛 Espresso는 InputManager.getInstance를 못 찾아 터치 테스트가 실패 — 고친 버전으로
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

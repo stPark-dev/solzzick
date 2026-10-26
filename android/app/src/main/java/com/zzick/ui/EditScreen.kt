@@ -133,10 +133,10 @@ private fun LivePreview(s: EditModel, modifier: Modifier) {
     }
     val overlay = s.settings.overlay
     val words = overlay.words(captureDate)
-    val mark by produceState<android.graphics.Bitmap?>(null, overlay.grade, words, s.settings.aspect) {
+    val mark by produceState<android.graphics.Bitmap?>(null, overlay.grade, words, overlay.corner, s.settings.aspect) {
         delay(200) // 암장 이름을 치는 동안 매 글자 다시 그리지 않게
         val (w, h) = VirtualCamera.outputSize(s.settings.toParams())
-        value = withContext(Dispatchers.Default) { OverlayImage.render(overlay.grade, words, w, h) }
+        value = withContext(Dispatchers.Default) { OverlayImage.render(overlay.grade, words, w, h, overlay.corner) }
     }
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         // 뷰 변환으로 확대된 영상이 상자 밖(다른 UI 위)으로 그려지지 않게 자른다

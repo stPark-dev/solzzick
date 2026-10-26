@@ -4,6 +4,7 @@ import com.zzick.core.batch.BatchItem
 import com.zzick.core.batch.BatchJob
 import com.zzick.core.batch.BatchQueue
 import com.zzick.core.batch.Stage
+import com.zzick.core.overlay.Corner
 import com.zzick.core.overlay.Grade
 import com.zzick.core.overlay.OverlayInfo
 import com.zzick.core.trim.TrimWindow
@@ -21,8 +22,9 @@ object BatchQueueCodec {
     /**
      * 2: 설정에 영상 구석 표시(OverlayInfo) 추가. 1도 읽는다(표시 없음).
      * 3: 작업(BatchJob) — 공통 설정이 작업마다. 1·2는 목록 전체를 "이전 작업" 하나로 읽는다.
+     * 4: 표시 구석(Corner). 3 이하는 왼쪽 아래.
      */
-    private const val VERSION = 3
+    private const val VERSION = 4
     const val PREVIOUS_JOB_NAME = "이전 작업"
 
     fun write(q: BatchQueue<*>, out: OutputStream) {
@@ -93,11 +95,13 @@ object BatchQueueCodec {
     private fun DataOutputStream.writeSettings(s: EditSettings) {
         writeDouble(s.zoom); writeDouble(s.shake); writeUTF(s.aspect.name); writeBoolean(s.motionZoom)
         writeUTF(s.overlay.gym); writeBoolean(s.overlay.showDate); writeOptional(s.overlay.grade) { writeUTF(it.name) }
+        writeUTF(s.overlay.corner.name)
     }
 
     private fun DataInputStream.readSettings(version: Int): EditSettings {
         val base = EditSettings(readDouble(), readDouble(), AspectRatio.valueOf(readUTF()), readBoolean())
         if (version < 2) return base
-        return base.copy(overlay = OverlayInfo(readUTF(), readBoolean(), readOptional { Grade.valueOf(readUTF()) }))
+        val overlay = OverlayInfo(readUTF(), readBoolean(), readOptional { Grade.valueOf(readUTF()) })
+        return base.copy(overlay = if (version < 4) overlay else overlay.copy(corner = Corner.valueOf(readUTF())))
     }
 }
