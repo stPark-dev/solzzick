@@ -223,7 +223,7 @@ class ClimbPipeline(private val context: Context) {
         val path = withContext(Dispatchers.Default) { solvePath(analysis, params) }
         val (outW, outH) = VirtualCamera.outputSize(params)
         val mark = withContext(Dispatchers.IO) {
-            OverlayImage.render(overlay.grade, overlay.words(if (overlay.showDate) captureDate(uri) else null), outW, outH)
+            OverlayImage.render(overlay.grade, overlay.words(if (overlay.showDate) captureDate(uri) else null), outW, outH, overlay.corner)
         }
         val window = trim ?: TrimWindow(analysis.firstPtsUs, analysis.lastPtsUs)
         val effect = CropEffect(path, analysis.result.ptsUs, window.startUs, analysis.srcW, analysis.srcH, outW, outH)

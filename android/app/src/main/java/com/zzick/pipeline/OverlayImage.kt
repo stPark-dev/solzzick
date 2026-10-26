@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
+import com.zzick.core.overlay.Corner
 import com.zzick.core.overlay.Grade
 import kotlin.math.min
 
@@ -29,7 +30,7 @@ object OverlayImage {
         close()
     }
 
-    fun render(grade: Grade?, words: String?, outW: Int, outH: Int): Bitmap? {
+    fun render(grade: Grade?, words: String?, outW: Int, outH: Int, corner: Corner = Corner.BOTTOM_LEFT): Bitmap? {
         val text = words?.takeIf { it.isNotBlank() }
         if (grade == null && text == null) return null
         val unit = min(outW, outH).toFloat()
@@ -53,8 +54,10 @@ object OverlayImage {
         val fm = paint.fontMetrics
         val textW = text?.let(paint::measureText) ?: 0f
         val contentH = maxOf(fm.descent - fm.ascent, if (grade != null) heartSize else 0f)
-        val bottom = outH - margin * 1.5f
-        val pill = RectF(margin, bottom - contentH - 2 * padY, margin + 2 * padX + heartW + gap + textW, bottom)
+        val pillW = 2 * padX + heartW + gap + textW
+        val pillH = contentH + 2 * padY
+        val (left, top) = corner.place(outW.toFloat(), outH.toFloat(), pillW, pillH, margin)
+        val pill = RectF(left, top, left + pillW, top + pillH)
         val bmp = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
         Canvas(bmp).apply {
             drawRoundRect(pill, pill.height() / 2, pill.height() / 2, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(115, 0, 0, 0) })

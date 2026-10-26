@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,9 +12,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -33,6 +37,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.zzick.core.overlay.Corner
 import com.zzick.core.overlay.Grade
 import com.zzick.core.overlay.OverlayInfo
 
@@ -41,7 +46,9 @@ import com.zzick.core.overlay.OverlayInfo
 @Composable
 fun OverlaySection(info: OverlayInfo, onChange: (OverlayInfo) -> Unit) {
     var open by rememberSaveable { mutableStateOf(false) }
-    val summary = listOfNotNull(info.grade?.emoji, info.gym.trim().ifEmpty { null }, "날짜".takeIf { info.showDate })
+    val shown = listOfNotNull(info.grade?.emoji, info.gym.trim().ifEmpty { null }, "날짜".takeIf { info.showDate })
+    // 기본(왼쪽 아래)이 아닌 구석이면 요약에도
+    val summary = (shown + listOfNotNull(info.corner.label.takeIf { shown.isNotEmpty() && info.corner != Corner.BOTTOM_LEFT }))
         .joinToString(" · ").ifEmpty { "없음" }
     Row(Modifier.fillMaxWidth().clickable { open = true }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("영상에 표시", Modifier.weight(1f), fontWeight = FontWeight.Bold)
@@ -90,6 +97,31 @@ fun OverlayControls(info: OverlayInfo, onChange: (OverlayInfo) -> Unit) {
         ) {
             Text("촬영 날짜", Modifier.weight(1f))
             Switch(checked = info.showDate, onCheckedChange = null)
+        }
+        CornerPicker(info.corner) { onChange(info.copy(corner = it)) }
+    }
+}
+
+/** 넣을 구석: 화면처럼 2×2로 놓은 네 버튼(사용자 요청, 기본 왼쪽 아래). */
+@Composable
+private fun CornerPicker(corner: Corner, onPick: (Corner) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("위치", Modifier.weight(1f))
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (row in listOf(listOf(Corner.TOP_LEFT, Corner.TOP_RIGHT), listOf(Corner.BOTTOM_LEFT, Corner.BOTTOM_RIGHT))) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (c in row) {
+                        val selected = c == corner
+                        Box(
+                            Modifier.width(96.dp).height(36.dp)
+                                .background(if (selected) Brand.HoldBlue else Color.White.copy(alpha = 0.7f), RoundedCornerShape(50))
+                                .border(1.dp, if (selected) Brand.HoldBlue else Brand.InkSoft.copy(alpha = 0.3f), RoundedCornerShape(50))
+                                .selectable(selected, role = Role.RadioButton) { onPick(c) },
+                            contentAlignment = Alignment.Center,
+                        ) { Text(c.label, fontSize = 13.sp, color = if (selected) Color.White else Brand.Ink) }
+                    }
+                }
+            }
         }
     }
 }

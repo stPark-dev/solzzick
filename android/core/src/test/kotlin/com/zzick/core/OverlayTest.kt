@@ -2,6 +2,7 @@ package com.zzick.core
 
 import com.zzick.core.batch.BatchQueue
 import com.zzick.core.overlay.CaptureDate
+import com.zzick.core.overlay.Corner
 import com.zzick.core.overlay.Grade
 import com.zzick.core.overlay.OverlayInfo
 import com.zzick.core.store.BatchQueueCodec
@@ -98,5 +99,27 @@ class OverlayTest {
         assertNull("빈 값(1904)", CaptureDate.parse("19040101T000000.000Z", seoul))
         assertNull(CaptureDate.parse("not a date", seoul))
         assertNull(CaptureDate.parse(null, seoul))
+    }
+
+    /** 사용자 요청: 표시를 네 구석 중에 고른다 — 기본은 지금처럼 왼쪽 아래. */
+    @Test
+    fun cornerDefaultsToBottomLeft() = assertEquals(Corner.BOTTOM_LEFT, OverlayInfo().corner)
+
+    /** 구석마다 여백(가로 m, 세로 1.5m)을 두고 그 구석에 붙인다. */
+    @Test
+    fun badgeIsPlacedInTheChosenCorner() {
+        val (w, h, bw, bh, m) = listOf(1080f, 1920f, 400f, 60f, 20f)
+        assertEquals(20f to 1920f - 30f - 60f, Corner.BOTTOM_LEFT.place(w, h, bw, bh, m))
+        assertEquals(1080f - 20f - 400f to 1920f - 30f - 60f, Corner.BOTTOM_RIGHT.place(w, h, bw, bh, m))
+        assertEquals(20f to 30f, Corner.TOP_LEFT.place(w, h, bw, bh, m))
+        assertEquals(1080f - 20f - 400f to 30f, Corner.TOP_RIGHT.place(w, h, bw, bh, m))
+    }
+
+    @Test
+    fun cornerSurvivesBatchListSaveAndRestore() {
+        val o = OverlayInfo(gym = "암장", corner = Corner.TOP_RIGHT)
+        val q = BatchQueue<String>().add(listOf("content://a")).let { it.withCommon(it.jobs[0].id, EditSettings(overlay = o)) }
+        val bytes = ByteArrayOutputStream().also { BatchQueueCodec.write(q, it) }.toByteArray()
+        assertEquals(Corner.TOP_RIGHT, BatchQueueCodec.read<String>(ByteArrayInputStream(bytes))!!.jobs[0].common.overlay.corner)
     }
 }

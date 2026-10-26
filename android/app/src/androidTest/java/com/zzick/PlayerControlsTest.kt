@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.zzick.core.overlay.Corner
 import com.zzick.core.overlay.Grade
 import com.zzick.core.overlay.OverlayInfo
 import com.zzick.ui.OverlayControls
@@ -53,5 +54,9 @@ class PlayerControlsTest {
         compose.onNodeWithTag("date").assertIsOff().performClick()
         compose.onNodeWithTag("date").assertIsOn()
         assertEquals(true, info.showDate)
+        // 사용자 요청: 넣을 구석을 고른다(기본 왼쪽 아래)
+        assertEquals(Corner.BOTTOM_LEFT, info.corner)
+        compose.onNodeWithText("오른쪽 위").performClick()
+        assertEquals(Corner.TOP_RIGHT, info.corner)
     }
 }
