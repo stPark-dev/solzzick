@@ -79,12 +79,12 @@ class TrackAudit {
             if (json.exists()) continue
             val uri = ContentUris.withAppendedId(MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), v.id)
             val root = JSONObject().put("name", v.name).put("durationMs", v.durationMs)
+            val samples = JSONArray() // 오류가 나도 남겨 원인을 볼 수 있게
             try {
                 val t0 = System.currentTimeMillis()
                 val preview = pipeline.findPeople(uri)
                 val tap = preview?.let { p -> if (p.boxes.size > 1) p.boxes.maxBy { it.height }.center else null }
                 root.put("people", preview?.boxes?.size ?: 0).put("tap", tap?.let { JSONArray(listOf(it.first, it.second)) })
-                val samples = JSONArray()
                 val a = pipeline.analyze(uri, tap, onSample = { s: SampleReport ->
                     samples.put(JSONArray().put(s.index).put(s.candidates)
                         .put(s.chosen?.let { JSONArray(it.toList()) } ?: JSONObject.NULL)
@@ -100,7 +100,7 @@ class TrackAudit {
                     .put("samples", samples)
                 thumbnails(pipeline, uri, a.fps, File(dir, base))
             } catch (e: Exception) {
-                root.put("error", e.toString())
+                root.put("error", e.toString()).put("samples", samples)
             }
             json.writeText(root.toString())
             Log.i(TAG, "${k + 1}/${videos.size} ${v.name} ${root.optLong("analyzeMs")}ms ${root.optString("error")}")

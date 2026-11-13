@@ -23,7 +23,7 @@ fun pickBox(boxes: List<Box>, x: Double, y: Double): Int? = boxes.withIndex().mi
  */
 fun showsClimber(boxes: List<Box>): Boolean = boxes.any { it.height >= MIN_CLIMBER_HEIGHT }
 
-private const val MIN_CLIMBER_HEIGHT = 0.15
+const val MIN_CLIMBER_HEIGHT = 0.15
 
 class FusedTrack(val track: Array<DoubleArray>, val source: IntArray)
 

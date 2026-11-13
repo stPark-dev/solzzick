@@ -500,7 +500,137 @@ class AnalyzerTest {
             .apply { for (i in 0 until 150) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
             .finish(fps)
         for (i in 0 until 150) assertTrue("frame $i 벽의 가짜로 감 y=${r.track[i][1] / h}", r.track[i][1] > 0.4 * h)
-        for (i in 36 until 150 step 3) assertEquals("frame $i x", cx(i) * w, r.track[i][0], 0.03 * w)
+        // 박스가 보이고 2초(60프레임) 동안 화면 전체 포즈가 못 잡으면 그때부터 잘라 찾는다
+        for (i in 93 until 150 step 3) assertEquals("frame $i x", cx(i) * w, r.track[i][0], 0.03 * w)
+    }
+
+    /**
+     * 위 수정의 회귀(102개 점검: 20260607_151150 포즈 92% → 5%, 20260525_110623): 첫 포즈 전에 멀리 있는 작은 사람 박스(0.05H)를
+     * 잘라 그 사람을 첫 포즈로 삼음. 첫 포즈 전에는 등반자 크기(0.15H 이상) 박스만 잘라 본다.
+     */
+    @Test
+    fun firstPoseIsNotTakenFromASmallFarPersonBox() {
+        val far = Box(0.9, 0.85, 0.94, 0.9) // 매트 멀리 앉은 작은 사람
+        val climber = Box(0.4, 0.3, 0.6, 0.8)
+        val pose = FakePose(
+            crop = { _, b -> listOf(person(((b.x0 + b.x1) / 2).toFloat(), ((b.y0 + b.y1) / 2).toFloat())) },
+        ) { i -> if (i >= 60) listOf(person(0.5f, 0.55f)) else listOf(person(0.2f, 0.15f)) }
+        val det = FakeDetector { i -> if (i >= 60) listOf(far, climber) else listOf(far) }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
+            .apply { for (i in 0 until 120) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 0 until 120) assertTrue("frame $i 작은 사람으로 감 x=${r.track[i][0] / w}", r.track[i][0] < 0.8 * w)
+        for (i in 63 until 120 step 3) assertEquals("frame $i src", Fuse.POSE, r.source[i])
+    }
+
+    /**
+     * 102개 점검에서 찾음(20260607_153728, 20260705_114555): 고르기 화면(영상 1초)에서 탭한 사람이 걸어서 벽으로 가는 동안
+     * 포즈가 늦게 잡힘 — 탭 모드의 첫 포즈는 탭 자리 0.2H 안이어야 해서 끝까지 시작을 못 함('등반자를 찾지 못했습니다').
+     * 첫 포즈 전에는 탭 자리에 처음 보인 사람 박스를 따라가며 기준을 옮긴다.
+     */
+    @Test
+    fun tappedPersonIsFollowedByBoxUntilTheFirstPose() {
+        fun cx(i: Int) = if (i < 30) 0.2 else 0.2 + 0.006 * (i - 30) // 1초 뒤부터 오른쪽으로 걸어감(3초에 0.56)
+        val pose = FakePose { i -> if (i >= 90) listOf(person(cx(i).toFloat(), 0.6f)) else emptyList() }
+        val det = FakeDetector { i -> if (i >= 30) listOf(Box(cx(i) - 0.1, 0.35, cx(i) + 0.1, 0.85)) else emptyList() }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, tap = 0.2 to 0.6, confirmStart = true)
+            .apply { for (i in 0 until 150) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 90 until 150 step 3) {
+            assertEquals("frame $i src", Fuse.POSE, r.source[i])
+            assertEquals("frame $i x", cx(i) * w, r.track[i][0], 0.02 * w)
+        }
+    }
+
+    /** 탭 자리에 사람이 나타나기 전에 지나간 다른 사람 박스는 따라가지 않는다(탭 자리에서 먼 박스). */
+    @Test
+    fun tapFollowStartsOnlyAtTheTappedSpot() {
+        val pose = FakePose { i -> if (i >= 90) listOf(person(0.8f, 0.6f), person(0.25f, 0.6f)) else emptyList() }
+        val det = FakeDetector { i ->
+            listOf(Box(0.7, 0.35, 0.9, 0.85)) + if (i >= 60) listOf(Box(0.15, 0.35, 0.35, 0.85)) else emptyList()
+        }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, tap = 0.25 to 0.6, confirmStart = true)
+            .apply { for (i in 0 until 150) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 90 until 150 step 3) assertEquals("frame $i x", 0.25 * w, r.track[i][0], 0.02 * w)
+    }
+
+    /**
+     * 위 수정의 회귀(102개 점검: 20260525_091713): 처음부터 매트에 선 사람(0.21H)을 잘라 첫 포즈로 삼음 — 등반자는 3초에 들어와
+     * 화면 전체 포즈로 바로 잡혔었다. 잘라 찾기는 화면 전체 포즈가 2초 넘게 못 잡을 때만, 0.25H 이상 박스만.
+     */
+    @Test
+    fun personOnTheMatIsNotTakenBeforeTheClimberWalksIn() {
+        val mat = Box(0.86, 0.71, 0.95, 0.92) // 0.21H
+        val climber = Box(0.0, 0.37, 0.26, 0.99)
+        val pose = FakePose(
+            crop = { _, b -> listOf(person(((b.x0 + b.x1) / 2).toFloat(), ((b.y0 + b.y1) / 2).toFloat())) },
+        ) { i -> if (i >= 87) listOf(person(0.12f, 0.6f)) else listOf(person(0.5f, 0.1f)) }
+        val det = FakeDetector { i -> if (i >= 87) listOf(mat, climber) else listOf(mat) }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
+            .apply { for (i in 0 until 150) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 0 until 150) assertTrue("frame $i 매트의 사람으로 감 x=${r.track[i][0] / w}", r.track[i][0] < 0.5 * w)
+    }
+
+    /**
+     * 102개 점검(20260801_163925): 첫 포즈 전, 왼쪽 끝으로 걸어 들어오는 등반자 박스(0.58H)를 잘라 찾았는데 포즈가 몸 일부(0.08H)뿐 —
+     * 그 키가 '등반자 크기' 기준이 되어 진짜 등반자 박스(0.6H)를 너무 크다고 버려 14초를 놓침. 박스 키의 절반 이상을 덮는 포즈만 받는다.
+     */
+    @Test
+    fun firstPoseFromACropMustFillThePersonBox() {
+        fun part(x: Float, y: Float): PoseCandidate { // 몸 일부만 보이는 포즈(키 0.06H)
+            val p = person(x, y)
+            return PoseCandidate(p.x, FloatArray(33) { i -> y + (p.y[i] - y) * 0.3f }, p.visibility)
+        }
+        val climber = { i: Int -> Box(0.0, 0.35 + 0.01 * (i % 4), 0.3, 0.95) } // 걸어 들어오는 사람 박스(조금씩 흔들림)
+        val pose = FakePose(crop = { _, _ -> listOf(part(0.15f, 0.65f)) }) { i ->
+            if (i >= 150) listOf(person(0.4f, 0.6f)) else emptyList() // 5초에 화면 전체 포즈가 등반자를 잡음
+        }
+        val det = FakeDetector { i -> listOf(if (i >= 150) Box(0.25, 0.3, 0.55, 0.9) else climber(i)) }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
+            .apply { for (i in 0 until 210) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 150 until 210 step 3) assertEquals("frame $i src", Fuse.POSE, r.source[i])
+    }
+
+    /** 리뷰: 영상 초반에 지나간 큰 사람 때문에, 한참 뒤 들어온 사람들에게 2초 기다림 없이 바로 잘라 찾기(가장 큰 박스부터)가 돌면 안 된다. */
+    @Test
+    fun cropWaitRestartsAfterBigBoxesDisappear() {
+        val passer = { i: Int -> Box(0.0, 0.1 + 0.01 * (i % 7), 0.5, 0.95) } // 카메라 앞을 지나는 큰 사람(0.85H)
+        val climber = { i: Int -> Box(0.3, 0.4 + 0.01 * (i % 7), 0.5, 0.8) }
+        fun filling(b: Box): PoseCandidate { // 박스 키를 다 덮는 포즈
+            val p = person(((b.x0 + b.x1) / 2).toFloat(), ((b.y0 + b.y1) / 2).toFloat())
+            val k = ((b.y1 - b.y0) / 0.2).toFloat()
+            val cy = ((b.y0 + b.y1) / 2).toFloat()
+            return PoseCandidate(p.x, FloatArray(33) { j -> cy + (p.y[j] - cy) * k }, p.visibility)
+        }
+        val pose = FakePose(crop = { _, b -> listOf(filling(b)) }) { i -> if (i >= 135) listOf(person(0.4f, 0.6f), person(0.125f, 0.475f)) else emptyList() }
+        val det = FakeDetector { i ->
+            when {
+                i < 30 -> listOf(passer(i))
+                i >= 120 -> listOf(climber(i), Box(0.05, 0.05 + 0.01 * (i % 7), 0.2, 0.9)) // 등반자 + 카메라 앞 큰 사람
+                else -> emptyList()
+            }
+        }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
+            .apply { for (i in 0 until 180) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 135 until 180 step 3) assertEquals("frame $i x", 0.4 * w, r.track[i][0], 0.03 * w)
+    }
+
+    /** 리뷰: 탭한 사람 박스가 사라지면(가만히 서 있어 걸러짐·검출 놓침) 멀리 있는 다른 사람으로 기준을 옮기면 안 된다. */
+    @Test
+    fun tapFollowDoesNotJumpToAnotherPersonWhenTheTappedBoxVanishes() {
+        val pose = FakePose { i -> if (i >= 150) listOf(person(0.15f, 0.6f), person(0.45f, 0.6f)) else emptyList() }
+        val det = FakeDetector { i ->
+            listOf(Box(0.35, 0.35 + 0.01 * (i % 7), 0.55, 0.85)) + // 빌레이어(탭에서 0.3H)
+                if (i in 30 until 60 || i >= 150) listOf(Box(0.05, 0.35 + 0.01 * (i % 7), 0.25, 0.85)) else emptyList() // 탭한 사람: 2~5초에 안 보임
+        }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, tap = 0.15 to 0.6, confirmStart = true)
+            .apply { for (i in 0 until 210) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 150 until 210 step 3) assertEquals("frame $i x", 0.15 * w, r.track[i][0], 0.03 * w)
     }
 
     /**
