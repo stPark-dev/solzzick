@@ -14,8 +14,8 @@ android {
         applicationId = "com.zzick"
         minSdk = 29
         targetSdk = 35
-        versionCode = 19
-        versionName = "0.4.8"
+        versionCode = 20
+        versionName = "0.4.9"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["appLabel"] = "솔찍"
     }
