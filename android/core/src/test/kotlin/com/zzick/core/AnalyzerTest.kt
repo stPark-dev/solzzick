@@ -484,6 +484,26 @@ class AnalyzerTest {
     }
 
     /**
+     * 점검에서 찾음(20260525_102454, 20260607_153728, 20260705_114555 — 30개 밖으로 넓힌 102개 점검): 포즈 모델(한 명 모드)이
+     * 처음부터 벽의 홀드에 붙어 가짜 하나만 내고, 등반자는 검출기 박스로만 보임. 첫 포즈 전에는 박스 주변을 잘라 찾지 않아
+     * 끝까지 시작을 못 함 → 카메라가 벽 한 점에 멈추거나 '등반자를 찾지 못했습니다'. 첫 포즈 전에도 사람 박스 주변을 잘라 찾는다.
+     */
+    @Test
+    fun firstPoseIsFoundAroundAPersonBoxWhenTheWholeFrameModelIsStuckOnTheWall() {
+        fun cx(i: Int) = 0.7 - 0.002 * i
+        val climberBox = { i: Int -> Box(cx(i) - 0.1, 0.4, cx(i) + 0.1, 0.8) }
+        val pose = FakePose(
+            crop = { i, b -> if (cx(i) in b.x0..b.x1) listOf(person(cx(i).toFloat(), 0.6f)) else emptyList() },
+        ) { listOf(person(0.2f, 0.15f)) } // 벽 위쪽 홀드의 가짜(어느 박스에도 없음)
+        val det = FakeDetector { i -> if (i >= 30) listOf(climberBox(i)) else emptyList() }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
+            .apply { for (i in 0 until 150) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 0 until 150) assertTrue("frame $i 벽의 가짜로 감 y=${r.track[i][1] / h}", r.track[i][1] > 0.4 * h)
+        for (i in 36 until 150 step 3) assertEquals("frame $i x", cx(i) * w, r.track[i][0], 0.03 * w)
+    }
+
+    /**
      * 점검에서 찾음(20260607_151150): 탭한 사람(벽 아래)이 아니라 0.43H 떨어진 매트의 작은 사람이 첫 포즈로 잡힘 —
      * 첫 포즈는 거리 제한 없이 탭에 가장 가까운 후보였다. 탭 모드의 첫 포즈는 탭 근처(0.2H)여야 한다.
      */

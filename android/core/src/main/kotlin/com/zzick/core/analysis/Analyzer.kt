@@ -331,12 +331,17 @@ class Analyzer<F>(
      * (사용자 제보: 20260525_093059). 빠른 동작은 박스 따라가기(anchorToBox, maxSpeed)가 맡고, 오래 놓치면 허용 거리가 늘어난다.
      */
     private fun aroundPersonBoxes(index: Int, frame: F): PoseCandidate? {
-        val ref = last ?: return null
-        val allowed = if (lastIndex < 0) Double.MAX_VALUE else jumpBase + CROP_SPEED * (index - lastIndex) / fps
-        fun dist(b: Box) = hypot(b.cx - ref[0], b.cy - ref[1])
-        return detected(frame, index)
-            .filter { dist(it) <= allowed && climberSized(it) }
-            .sortedBy(::dist)
+        val ref = last
+        val boxes = detected(frame, index)
+        val order = if (ref == null) {
+            // 한 명 모드의 첫 포즈 전(탭 모드는 탭 위치가 기준): 화면 전체 포즈가 벽에 붙어 가짜만 낼 때(점검: 20260525_102454) — 큰 사람 박스부터
+            boxes.sortedByDescending { it.y1 - it.y0 }
+        } else {
+            val allowed = if (lastIndex < 0) Double.MAX_VALUE else jumpBase + CROP_SPEED * (index - lastIndex) / fps
+            fun dist(b: Box) = hypot(b.cx - ref[0], b.cy - ref[1])
+            boxes.filter { dist(it) <= allowed && climberSized(it) }.sortedBy(::dist)
+        }
+        return order
             .take(MAX_CROPS)
             .firstNotNullOfOrNull { b ->
                 pose.estimateCrop(frame, Box(b.x0 / aspect, b.y0, b.x1 / aspect, b.y1))
