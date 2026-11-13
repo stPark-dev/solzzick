@@ -1,5 +1,6 @@
 package com.zzick.core.batch
 
+import com.zzick.core.overlay.Grade
 import com.zzick.core.trim.TrimWindow
 import com.zzick.core.vcam.EditSettings
 
@@ -22,6 +23,9 @@ sealed interface Work {
  * @param name 사용자가 붙인 이름(없으면 화면에 만든 날짜·시간)
  */
 data class BatchJob(val id: Int, val createdAtMs: Long, val name: String?, val common: EditSettings)
+
+/** 작업 목록에 보일 작업 영상들의 난이도 색·암장 이름(겹치지 않게, 영상 순서대로). */
+data class JobBadges(val grades: List<Grade>, val gyms: List<String>)
 
 /** @param A 분석 결과 타입(앱의 Analysis). core는 내용을 모른다. */
 data class BatchItem<A>(
@@ -132,6 +136,29 @@ data class BatchQueue<A>(
     fun settingsFor(id: Int): EditSettings = item(id).let { it.settings ?: job(it.jobId).common }
 
     /**
+     * 이 영상의 일보다 먼저 할 일의 수(nextWork 순서: 분석 단계 일이 목록 순서대로 먼저, 그다음 만들기).
+     * 지금 돌고 있는 일은 끝날 때까지 계속되므로 목록 어디에 있든 센다. 기다리지 않는 영상은 0.
+     */
+    fun aheadOf(id: Int): Int {
+        val i = items.indexOfFirst { it.id == id }
+        val before = items.take(i)
+        val first = when (items[i].stage) {
+            Stage.QUEUED, Stage.WAITING_ANALYSIS -> before.filter { it.stage in ANALYSIS_PENDING }
+            Stage.WAITING_RENDER -> items.filter { it.stage in ANALYSIS_PENDING } + before.filter { it.stage in RENDER_PENDING }
+            else -> return 0
+        }
+        return (first + items.filter { it.stage in RUNNING }).distinctBy { it.id }.size
+    }
+
+    fun badgesOf(jobId: Int): JobBadges {
+        val overlays = itemsOf(jobId).map { settingsFor(it.id).overlay }
+        return JobBadges(
+            grades = overlays.mapNotNull { it.grade }.distinct(),
+            gyms = overlays.mapNotNull { it.gym.trim().ifEmpty { null } }.distinct(),
+        )
+    }
+
+    /**
      * 앱을 다시 켰을 때 저장본에서 복원한 큐를 이어서 처리할 수 있게 정리한다.
      * 중간에 끊긴 일은 대기로 되돌리고, 분석 결과는 analysisFor(분석 저장본)로 다시 붙인다 — 없으면 다시 분석.
      * 선택 화면용 첫 장면은 저장하지 않으므로 선택 대기는 사람 찾기부터 다시.
@@ -160,6 +187,9 @@ data class BatchQueue<A>(
 
     private companion object {
         const val MAX_NAME = 40
+        val ANALYSIS_PENDING = setOf(Stage.QUEUED, Stage.SCANNING, Stage.WAITING_ANALYSIS, Stage.ANALYZING)
+        val RENDER_PENDING = setOf(Stage.WAITING_RENDER, Stage.RENDERING)
+        val RUNNING = setOf(Stage.SCANNING, Stage.ANALYZING, Stage.RENDERING)
         val CANCELLABLE = setOf(Stage.QUEUED, Stage.SCANNING, Stage.WAITING_ANALYSIS, Stage.ANALYZING, Stage.WAITING_RENDER, Stage.RENDERING)
     }
 }
