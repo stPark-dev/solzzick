@@ -135,15 +135,19 @@ data class BatchQueue<A>(
 
     fun settingsFor(id: Int): EditSettings = item(id).let { it.settings ?: job(it.jobId).common }
 
-    /** 이 영상의 일보다 먼저 할 일의 수(nextWork 순서: 분석 단계 일이 목록 순서대로 먼저, 그다음 만들기). 기다리지 않는 영상은 0. */
+    /**
+     * 이 영상의 일보다 먼저 할 일의 수(nextWork 순서: 분석 단계 일이 목록 순서대로 먼저, 그다음 만들기).
+     * 지금 돌고 있는 일은 끝날 때까지 계속되므로 목록 어디에 있든 센다. 기다리지 않는 영상은 0.
+     */
     fun aheadOf(id: Int): Int {
         val i = items.indexOfFirst { it.id == id }
         val before = items.take(i)
-        return when (items[i].stage) {
-            Stage.QUEUED, Stage.WAITING_ANALYSIS -> before.count { it.stage in ANALYSIS_PENDING }
-            Stage.WAITING_RENDER -> items.count { it.stage in ANALYSIS_PENDING } + before.count { it.stage in RENDER_PENDING }
-            else -> 0
+        val first = when (items[i].stage) {
+            Stage.QUEUED, Stage.WAITING_ANALYSIS -> before.filter { it.stage in ANALYSIS_PENDING }
+            Stage.WAITING_RENDER -> items.filter { it.stage in ANALYSIS_PENDING } + before.filter { it.stage in RENDER_PENDING }
+            else -> return 0
         }
+        return (first + items.filter { it.stage in RUNNING }).distinctBy { it.id }.size
     }
 
     fun badgesOf(jobId: Int): JobBadges {
@@ -185,6 +189,7 @@ data class BatchQueue<A>(
         const val MAX_NAME = 40
         val ANALYSIS_PENDING = setOf(Stage.QUEUED, Stage.SCANNING, Stage.WAITING_ANALYSIS, Stage.ANALYZING)
         val RENDER_PENDING = setOf(Stage.WAITING_RENDER, Stage.RENDERING)
+        val RUNNING = setOf(Stage.SCANNING, Stage.ANALYZING, Stage.RENDERING)
         val CANCELLABLE = setOf(Stage.QUEUED, Stage.SCANNING, Stage.WAITING_ANALYSIS, Stage.ANALYZING, Stage.WAITING_RENDER, Stage.RENDERING)
     }
 }
