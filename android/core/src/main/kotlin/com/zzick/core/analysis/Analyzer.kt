@@ -104,6 +104,7 @@ class Analyzer<F>(
     private var bigBoxSince = -1 // 한 명 모드의 첫 포즈 전, 큰 사람 박스가 (끊김 없이) 보이기 시작한 프레임
     private var bigBoxLast = -1 // 마지막으로 큰 사람 박스가 보인 프레임
     private var tapFollowIndex = -1 // 첫 포즈 전, 탭한 사람의 박스를 마지막으로 따라간 프레임(-1: 아직 탭 자리에 안 보임)
+    private var tapBox: Box? = null // 그 박스
     private var look: FloatArray? = null // 등반자 몸통 색 분포(최근 채택 포즈의 이동 평균)
     private var lookSamples = 0
     private var offLookStreak = 0 // 색이 다른데 받은 포즈가 연속 몇 번째인지
@@ -213,14 +214,28 @@ class Analyzer<F>(
     private fun followTapped(frameBoxes: List<Box>, index: Int): Box? {
         val ref = last ?: return null
         if (tapPoint == null || lastPoseIndex >= 0) return null
-        fun dist(b: Box) = hypot(b.cx - ref[0], b.cy - ref[1])
-        // 한 번에 탭 반경만큼만, 2초 넘게 놓치면 그만 — 탭한 사람 박스가 사라졌을 때(가만히 서 있어 걸러짐 등) 옆 사람으로 넘어가지 않게(리뷰)
-        if (tapFollowIndex >= 0 && index - tapFollowIndex > REACQUIRE_S * fps) return null
-        val allowed = if (tapFollowIndex < 0) START_RADIUS else min(START_RADIUS, jumpBase + maxSpeed * (index - tapFollowIndex) / fps)
-        val best = frameBoxes.filter { it.height >= MIN_CLIMBER_HEIGHT && dist(it) <= allowed }.minByOrNull(::dist) ?: return null
+        val sized = frameBoxes.filter { it.height >= MIN_CLIMBER_HEIGHT }
+        val prev = tapBox
+        val best = if (prev == null) {
+            sized.filter { hypot(it.cx - ref[0], it.cy - ref[1]) <= START_RADIUS }.minByOrNull { hypot(it.cx - ref[0], it.cy - ref[1]) }
+        } else {
+            // 직전 박스와 겹치는 박스만(가장 많이 겹치는 것), 2초 넘게 놓치면 그만 — 다가오며 커지는 박스는 따라가고(점검: 20260817_105255),
+            // 탭한 사람 박스가 사라졌을 때 떨어져 있는 옆 사람으로 넘어가지 않게(리뷰)
+            if (index - tapFollowIndex > REACQUIRE_S * fps) return null
+            sized.map { it to iou(it, prev) }.filter { it.second > 0 }.maxByOrNull { it.second }?.first
+        } ?: return null
         last = doubleArrayOf(best.cx, best.cy)
+        tapBox = best
         tapFollowIndex = index
         return best
+    }
+
+    private fun iou(a: Box, b: Box): Double {
+        val iw = min(a.x1, b.x1) - max(a.x0, b.x0)
+        val ih = min(a.y1, b.y1) - max(a.y0, b.y0)
+        if (iw <= 0 || ih <= 0) return 0.0
+        val inter = iw * ih
+        return inter / ((a.x1 - a.x0) * a.height + (b.x1 - b.x0) * b.height - inter)
     }
 
     /** 공백이 시작된 걸 안 샘플 프레임: 마지막 포즈 프레임의 몸 박스에서 점을 고르고 이 프레임까지 한 번에 따라간다. */
@@ -361,9 +376,10 @@ class Analyzer<F>(
             // 가까운 등반자만 한 박스가 2초 넘게 보이는데도 못 잡을 때만 — 매트의 사람(0.15~0.21H)을 등반자가 들어오기 전에
             // 첫 포즈로 삼지 않게(점검: 20260607_151150, 20260525_091713)
             val big = boxes.filter { it.height >= START_CROP_MIN_HEIGHT }
-            // 큰 박스가 1초 넘게 안 보이면 기다림을 다시 센다 — 초반에 지나간 사람 때문에 나중에 들어온 사람들을 바로 잘라 찾지 않게(리뷰)
+            // 큰 박스가 5초 넘게 안 보였으면 기다림을 다시 센다 — 초반에 지나간 사람 때문에 나중에 들어온 사람들을 바로 잘라 찾지 않게(리뷰).
+            // 짧은 공백(검출기가 1~2초씩 놓침)으로는 다시 세지 않는다(점검: 20260525_102454)
             if (big.isNotEmpty()) {
-                if (bigBoxSince < 0 || index - bigBoxLast > fps) bigBoxSince = index
+                if (bigBoxSince < 0 || index - bigBoxLast > START_STALE_S * fps) bigBoxSince = index
                 bigBoxLast = index
             }
             if (bigBoxSince < 0 || index - bigBoxSince < START_STUCK_S * fps) emptyList() else big.sortedByDescending { it.height }
@@ -516,7 +532,8 @@ class Analyzer<F>(
         private const val RELEARN_MOVE = 0.05 // 그동안 몸통이 이만큼(높이 비율) 움직였어야 다시 익힌다
         private const val START_CROP_MIN_HEIGHT = 0.25 // 첫 포즈 전 잘라 찾을 박스의 최소 키(높이 비율)
         private const val START_FILL = 0.5 // 첫 포즈 전 잘라 찾은 포즈: 박스 키의 이 배율 이상
-        private const val START_STUCK_S = 2.0 // 큰 박스가 보인 뒤 이만큼 화면 전체 포즈가 못 잡으면 잘라 찾는다
+        private const val START_STUCK_S = 2.0
+        private const val START_STALE_S = 5.0 // 큰 박스가 이만큼 안 보였으면 기다림을 처음부터 // 큰 박스가 보인 뒤 이만큼 화면 전체 포즈가 못 잡으면 잘라 찾는다
         private const val START_RADIUS = 0.2 // 탭 모드 첫 포즈: 탭에서 이 거리(높이 비율) 안
         private const val REACQUIRE_S = 2.0 // 이만큼 포즈를 놓친 뒤 다시 잡을 때도 사람 박스 확인
         private const val STATIC_S = 2.0 // 이만큼 전 박스와 거의 같은 자리면 움직이지 않는 박스(사람 아님)

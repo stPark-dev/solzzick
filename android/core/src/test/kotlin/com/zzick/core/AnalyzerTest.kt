@@ -594,7 +594,7 @@ class AnalyzerTest {
         for (i in 150 until 210 step 3) assertEquals("frame $i src", Fuse.POSE, r.source[i])
     }
 
-    /** 리뷰: 영상 초반에 지나간 큰 사람 때문에, 한참 뒤 들어온 사람들에게 2초 기다림 없이 바로 잘라 찾기(가장 큰 박스부터)가 돌면 안 된다. */
+    /** 리뷰: 영상 초반에 지나간 큰 사람 때문에, 한참(10초) 뒤 들어온 사람들에게 2초 기다림 없이 바로 잘라 찾기(가장 큰 박스부터)가 돌면 안 된다. */
     @Test
     fun cropWaitRestartsAfterBigBoxesDisappear() {
         val passer = { i: Int -> Box(0.0, 0.1 + 0.01 * (i % 7), 0.5, 0.95) } // 카메라 앞을 지나는 큰 사람(0.85H)
@@ -605,18 +605,18 @@ class AnalyzerTest {
             val cy = ((b.y0 + b.y1) / 2).toFloat()
             return PoseCandidate(p.x, FloatArray(33) { j -> cy + (p.y[j] - cy) * k }, p.visibility)
         }
-        val pose = FakePose(crop = { _, b -> listOf(filling(b)) }) { i -> if (i >= 135) listOf(person(0.4f, 0.6f), person(0.125f, 0.475f)) else emptyList() }
+        val pose = FakePose(crop = { _, b -> listOf(filling(b)) }) { i -> if (i >= 315) listOf(person(0.4f, 0.6f), person(0.125f, 0.475f)) else emptyList() }
         val det = FakeDetector { i ->
             when {
                 i < 30 -> listOf(passer(i))
-                i >= 120 -> listOf(climber(i), Box(0.05, 0.05 + 0.01 * (i % 7), 0.2, 0.9)) // 등반자 + 카메라 앞 큰 사람
+                i >= 300 -> listOf(climber(i), Box(0.05, 0.05 + 0.01 * (i % 7), 0.2, 0.9)) // 등반자 + 카메라 앞 큰 사람
                 else -> emptyList()
             }
         }
         val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
-            .apply { for (i in 0 until 180) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .apply { for (i in 0 until 360) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
             .finish(fps)
-        for (i in 135 until 180 step 3) assertEquals("frame $i x", 0.4 * w, r.track[i][0], 0.03 * w)
+        for (i in 315 until 360 step 3) assertEquals("frame $i x", 0.4 * w, r.track[i][0], 0.03 * w)
     }
 
     /** 리뷰: 탭한 사람 박스가 사라지면(가만히 서 있어 걸러짐·검출 놓침) 멀리 있는 다른 사람으로 기준을 옮기면 안 된다. */
@@ -631,6 +631,39 @@ class AnalyzerTest {
             .apply { for (i in 0 until 210) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
             .finish(fps)
         for (i in 150 until 210 step 3) assertEquals("frame $i x", 0.15 * w, r.track[i][0], 0.03 * w)
+    }
+
+    /**
+     * 리뷰 반영의 회귀(102개 점검: 20260817_105255): 탭한 사람이 카메라 쪽으로 다가오며 박스가 빠르게 커져 중심이 한 번에 0.3H 가까이
+     * 움직임 — '한 번에 0.2H' 상한에 걸려 따라가기가 끊기고 끝까지 시작을 못 함. 직전 박스와 겹치는 박스는 따라간다.
+     */
+    @Test
+    fun tapFollowKeepsUpWithAPersonApproachingTheCamera() {
+        val seq = listOf( // 실제 점검 기록(정규화)
+            Box(0.0, 0.0, 0.43, 0.61), Box(0.0, 0.0, 0.22, 0.5), Box(0.0, 0.0, 0.5, 0.79), Box(0.0, 0.0, 0.59, 1.0),
+            Box(0.01, 0.0, 0.73, 1.0), Box(0.09, 0.11, 0.63, 0.99), Box(0.42, 0.22, 0.65, 0.98), Box(0.38, 0.32, 0.76, 0.99),
+        )
+        fun box(i: Int) = seq.getOrNull((i - 27) / 9) ?: Box(0.52, 0.45, 0.7, 0.92)
+        val pose = FakePose { i -> if (i >= 120) listOf(person(0.61f, 0.65f)) else emptyList() }
+        val det = FakeDetector { i -> if (i >= 27) listOf(box(i)) else emptyList() }
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, tap = 0.21 to 0.32, confirmStart = true)
+            .apply { for (i in 0 until 180) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        for (i in 120 until 180 step 3) assertEquals("frame $i src", Fuse.POSE, r.source[i])
+    }
+
+    /** 리뷰 반영의 회귀(102개 점검: 20260525_102454): 등반자 박스가 1~2초씩 자주 빠져 '1초 안 보이면 다시 셈'에 걸려 2초 기다림이 끝나지 않음. */
+    @Test
+    fun cropWaitSurvivesShortDetectorGaps() {
+        fun cx(i: Int) = 0.7 - 0.001 * i
+        val pose = FakePose(
+            crop = { i, b -> if (cx(i) in b.x0..b.x1) listOf(person(cx(i).toFloat(), 0.6f)) else emptyList() },
+        ) { listOf(person(0.2f, 0.15f)) }
+        val det = FakeDetector { i -> if ((i / 45) % 2 == 0) listOf(Box(cx(i) - 0.1, 0.42 + 0.01 * (i % 7), cx(i) + 0.1, 0.8)) else emptyList() } // 1.5초씩 보였다 안 보였다
+        val r = Analyzer(pose, det, w, h, fps, stride = 3, confirmStart = true)
+            .apply { for (i in 0 until 300) onFrame(i, (i * 1_000_000L / fps).toLong(), i) }
+            .finish(fps)
+        assertTrue("시작을 못 함", (0 until 300).any { r.source[it] == Fuse.POSE })
     }
 
     /**
