@@ -1,5 +1,6 @@
 package com.zzick.core.batch
 
+import com.zzick.core.overlay.Grade
 import com.zzick.core.trim.TrimWindow
 import com.zzick.core.vcam.EditSettings
 
@@ -22,6 +23,9 @@ sealed interface Work {
  * @param name 사용자가 붙인 이름(없으면 화면에 만든 날짜·시간)
  */
 data class BatchJob(val id: Int, val createdAtMs: Long, val name: String?, val common: EditSettings)
+
+/** 작업 목록에 보일 작업 영상들의 난이도 색·암장 이름(겹치지 않게, 영상 순서대로). */
+data class JobBadges(val grades: List<Grade>, val gyms: List<String>)
 
 /** @param A 분석 결과 타입(앱의 Analysis). core는 내용을 모른다. */
 data class BatchItem<A>(
@@ -130,6 +134,14 @@ data class BatchQueue<A>(
     fun withWindow(id: Int, window: TrimWindow) = update(id) { it.copy(window = window) }
 
     fun settingsFor(id: Int): EditSettings = item(id).let { it.settings ?: job(it.jobId).common }
+
+    fun badgesOf(jobId: Int): JobBadges {
+        val overlays = itemsOf(jobId).map { settingsFor(it.id).overlay }
+        return JobBadges(
+            grades = overlays.mapNotNull { it.grade }.distinct(),
+            gyms = overlays.mapNotNull { it.gym.trim().ifEmpty { null } }.distinct(),
+        )
+    }
 
     /**
      * 앱을 다시 켰을 때 저장본에서 복원한 큐를 이어서 처리할 수 있게 정리한다.

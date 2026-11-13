@@ -7,7 +7,13 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithContentDescription
 import com.zzick.core.batch.BatchQueue
+import com.zzick.core.overlay.Grade
+import com.zzick.core.overlay.OverlayInfo
+import com.zzick.core.vcam.EditSettings
 import com.zzick.core.trim.TrimWindow
 import com.zzick.pipeline.Analysis
 import com.zzick.ui.BatchActions
@@ -118,5 +124,30 @@ class BatchListUiTest {
     fun emptyJobListExplainsHowToStart() {
         compose.setContent { JobList(BatchQueue(), JobRecorder()) }
         compose.onNodeWithText("아직 작업이 없어요", substring = true).assertExists()
+    }
+
+    /** 사용자 요청: 작업 목록에서 편집 중인 영상의 난이도 색과 암장 이름이 보이게(작업 카드·작업 안 영상 줄 모두). */
+    @Test
+    fun showsGradeColorsAndGymsOfTheVideos() {
+        fun s(g: Grade?, gym: String) = EditSettings(overlay = OverlayInfo(gym = gym, grade = g))
+        var q = BatchQueue<Analysis>().add(listOf("file:///a.mp4", "file:///b.mp4"), createdAtMs = 1_791_000_000_000L, common = s(Grade.PINK, "클라임 A"))
+        q = q.withItemSettings(q.items[1].id, s(Grade.PURPLE, "클라임 A"))
+        q = q.add(listOf("file:///c.mp4"), createdAtMs = 1_791_003_600_000L, common = EditSettings())
+        compose.setContent { JobList(q, JobRecorder()) }
+        compose.onNodeWithText("클라임 A").assertExists()
+        compose.onNodeWithContentDescription("난이도 분홍").assertExists()
+        compose.onNodeWithContentDescription("난이도 보라").assertExists()
+        compose.onAllNodesWithContentDescription("난이도", substring = true, useUnmergedTree = true).assertCountEquals(2) // 표시 안 한 작업엔 없음
+    }
+
+    @Test
+    fun videoRowShowsItsOwnGradeAndGym() {
+        fun s(g: Grade?, gym: String) = EditSettings(overlay = OverlayInfo(gym = gym, grade = g))
+        var q = BatchQueue<Analysis>().add(listOf("file:///a.mp4", "file:///b.mp4"), common = s(Grade.PINK, "클라임 A"))
+        q = q.withItemSettings(q.items[1].id, s(Grade.YELLOW, "클라임 B"))
+        compose.setContent { BatchList(q, q.jobs[0].id, Recorder()) }
+        compose.onNodeWithText("클라임 B").assertExists()
+        compose.onNodeWithContentDescription("난이도 노랑").assertExists()
+        compose.onNodeWithContentDescription("난이도 분홍").assertExists()
     }
 }

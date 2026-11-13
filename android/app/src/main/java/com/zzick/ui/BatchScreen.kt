@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -34,6 +38,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,6 +50,7 @@ import com.zzick.core.batch.BatchItem
 import com.zzick.core.batch.BatchJob
 import com.zzick.core.batch.BatchQueue
 import com.zzick.core.batch.Stage
+import com.zzick.core.overlay.Grade
 import com.zzick.core.store.BatchQueueCodec
 import com.zzick.core.tracking.pickBox
 import com.zzick.core.trim.TrimWindow
@@ -128,6 +135,26 @@ private fun stageColor(stage: Stage): Color = when (stage) {
     else -> Brand.InkSoft
 }
 
+/** 영상에 넣을 난이도 색(동그라미)·암장 이름 한 줄(사용자 요청). 둘 다 없으면 그리지 않는다. */
+@Composable
+private fun GradeGymLine(grades: List<Grade>, gyms: List<String>) {
+    if (grades.isEmpty() && gyms.isEmpty()) return
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (g in grades) {
+            Spacer(
+                Modifier.size(14.dp).background(Color(g.argb), CircleShape).border(1.dp, Brand.InkSoft.copy(alpha = 0.4f), CircleShape)
+                    .semantics { contentDescription = "난이도 ${g.label}" },
+            )
+        }
+        if (gyms.isNotEmpty()) {
+            Text(
+                gyms.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = Brand.InkSoft, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = if (grades.isEmpty()) 0.dp else 2.dp),
+            )
+        }
+    }
+}
+
 /** 작업 목록(상태 없음): 작업마다 제목·진행 요약, 열기·이름·삭제(확인 후). 최근 작업이 위. */
 @Composable
 fun JobList(q: BatchQueue<Analysis>, actions: JobActions) {
@@ -163,6 +190,7 @@ fun JobList(q: BatchQueue<Analysis>, actions: JobActions) {
                                 Text(jobTitle(job.copy(name = null)), style = MaterialTheme.typography.bodySmall, color = Brand.InkSoft)
                             }
                             Text(jobSummary(jobItems), style = MaterialTheme.typography.bodySmall, color = Brand.InkSoft)
+                            q.badgesOf(job.id).let { GradeGymLine(it.grades, it.gyms) }
                         }
                         TextButton(onClick = { renamingId = job.id }) { Text("이름", color = Brand.HoldBlue) }
                         TextButton(onClick = { removingId = job.id }) { Text("삭제", color = Brand.InkSoft) }
@@ -229,6 +257,7 @@ fun BatchList(q: BatchQueue<Analysis>, jobId: Int, actions: BatchActions) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                q.settingsFor(item.id).overlay.let { GradeGymLine(listOfNotNull(it.grade), listOfNotNull(it.gym.trim().ifEmpty { null })) }
                                 StatusPill(statusText(item), color)
                             }
                             when (item.stage) {
