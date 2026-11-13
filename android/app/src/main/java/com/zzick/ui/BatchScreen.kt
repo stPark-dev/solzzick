@@ -101,17 +101,19 @@ private fun jobSummary(items: List<BatchItem<Analysis>>): String {
     return parts.joinToString(" · ")
 }
 
-private fun statusText(item: BatchItem<Analysis>): String {
+private fun statusText(item: BatchItem<Analysis>, ahead: Int, eta: String?): String {
     val pct = "${(item.progress * 100).toInt()}%"
+    val turn = if (ahead > 0) " · 앞에 ${ahead}개" else ""
+    val left = eta?.let { " · $it" } ?: ""
     return when (item.stage) {
-        Stage.QUEUED -> "대기 중"
+        Stage.QUEUED -> "대기 중$turn"
         Stage.SCANNING -> "등반자 찾는 중"
         Stage.NEEDS_SELECTION -> "등반자 선택 필요"
-        Stage.WAITING_ANALYSIS -> "분석 대기"
-        Stage.ANALYZING -> "분석 중 $pct"
+        Stage.WAITING_ANALYSIS -> "분석 대기$turn"
+        Stage.ANALYZING -> "분석 중 $pct$left"
         Stage.READY -> "준비됨 · ${fmt(item.window?.durationUs ?: 0)}"
-        Stage.WAITING_RENDER -> "만들기 대기"
-        Stage.RENDERING -> "만드는 중 $pct"
+        Stage.WAITING_RENDER -> "만들기 대기$turn"
+        Stage.RENDERING -> "만드는 중 $pct$left"
         Stage.DONE -> "완료"
         Stage.FAILED -> "실패: ${item.error ?: "알 수 없는 오류"}"
     }
@@ -258,7 +260,8 @@ fun BatchList(q: BatchQueue<Analysis>, jobId: Int, actions: BatchActions) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 q.settingsFor(item.id).overlay.let { GradeGymLine(listOfNotNull(it.grade), listOfNotNull(it.gym.trim().ifEmpty { null })) }
-                                StatusPill(statusText(item), color)
+                                val eta = rememberEtaLabel(item.id to item.stage, item.progress)
+                                StatusPill(statusText(item, q.aheadOf(item.id), eta), color)
                             }
                             when (item.stage) {
                                 Stage.NEEDS_SELECTION -> TextButton(onClick = { actions.select(item.id) }) { Text("등반자 선택", color = Brand.Orange) }

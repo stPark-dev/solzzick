@@ -135,6 +135,17 @@ data class BatchQueue<A>(
 
     fun settingsFor(id: Int): EditSettings = item(id).let { it.settings ?: job(it.jobId).common }
 
+    /** 이 영상의 일보다 먼저 할 일의 수(nextWork 순서: 분석 단계 일이 목록 순서대로 먼저, 그다음 만들기). 기다리지 않는 영상은 0. */
+    fun aheadOf(id: Int): Int {
+        val i = items.indexOfFirst { it.id == id }
+        val before = items.take(i)
+        return when (items[i].stage) {
+            Stage.QUEUED, Stage.WAITING_ANALYSIS -> before.count { it.stage in ANALYSIS_PENDING }
+            Stage.WAITING_RENDER -> items.count { it.stage in ANALYSIS_PENDING } + before.count { it.stage in RENDER_PENDING }
+            else -> 0
+        }
+    }
+
     fun badgesOf(jobId: Int): JobBadges {
         val overlays = itemsOf(jobId).map { settingsFor(it.id).overlay }
         return JobBadges(
@@ -172,6 +183,8 @@ data class BatchQueue<A>(
 
     private companion object {
         const val MAX_NAME = 40
+        val ANALYSIS_PENDING = setOf(Stage.QUEUED, Stage.SCANNING, Stage.WAITING_ANALYSIS, Stage.ANALYZING)
+        val RENDER_PENDING = setOf(Stage.WAITING_RENDER, Stage.RENDERING)
         val CANCELLABLE = setOf(Stage.QUEUED, Stage.SCANNING, Stage.WAITING_ANALYSIS, Stage.ANALYZING, Stage.WAITING_RENDER, Stage.RENDERING)
     }
 }

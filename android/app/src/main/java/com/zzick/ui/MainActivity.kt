@@ -58,7 +58,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -162,9 +161,9 @@ private fun EditorScreen(vm: EditorViewModel, processor: BatchProcessor, openBat
                 PillOutlinedButton(onClick = vm::cancel) { Text("취소") }
             }
             is EditorState.Select -> SelectClimber(s, vm)
-            is EditorState.Analyzing -> Progress("등반자 추적 중", s.progress, vm::cancel)
+            is EditorState.Analyzing -> ProgressPanel("등반자 추적 중", s.progress, vm::cancel)
             is EditorState.Edit -> EditScreen(s, vm)
-            is EditorState.Rendering -> Progress("영상 만드는 중", s.progress, vm::cancel)
+            is EditorState.Rendering -> ProgressPanel("영상 만드는 중", s.progress, vm::cancel)
             is EditorState.Done -> Done(s, vm)
             is EditorState.Failed -> {
                 Text("앗, 미끄러졌어요!", style = MaterialTheme.typography.titleLarge, color = Brand.HoldRed)
@@ -184,16 +183,6 @@ private fun SelectClimber(s: EditorState.Select, vm: EditorViewModel) {
         PillOutlinedButton(onClick = vm::reset) { Text("취소") }
         SunsetButton(onClick = vm::onStart, enabled = s.selected != null) { Text("시작!") }
     }
-}
-
-@Composable
-private fun Progress(label: String, progress: Float, onCancel: () -> Unit) {
-    BouncyLogo(Modifier.height(80.dp))
-    Text(label, style = MaterialTheme.typography.titleLarge)
-    Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = Brand.Orange)
-    SunsetProgress(progress)
-    Text("화면을 켜둔 채 기다려 주세요", style = MaterialTheme.typography.bodySmall, color = Brand.InkSoft)
-    PillOutlinedButton(onClick = onCancel) { Text("취소") }
 }
 
 @UnstableApi
