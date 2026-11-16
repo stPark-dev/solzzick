@@ -1,7 +1,7 @@
 package com.zzick.ui
 
 import android.content.Context
-import android.content.Intent
+import android.widget.Toast
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
@@ -323,7 +323,7 @@ fun BatchScreen(processor: BatchProcessor, jobId: Int?, onOpenJob: (Int?) -> Uni
             override fun remove(id: Int) = processor.remove(id)
             override fun open(id: Int) {
                 val out = q.item(id).output ?: return
-                context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(out), "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                if (!openVideo(context, out)) Toast.makeText(context, "영상을 열 수 없어요. 갤러리에서 지워졌을 수 있어요.", Toast.LENGTH_LONG).show()
             }
             override fun renderAll() = processor.renderAll(job.id)
             override fun commonChanged(s: EditSettings) = processor.setCommon(job.id, s)
